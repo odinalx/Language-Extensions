@@ -1,0 +1,98 @@
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  width: 280px;
+  min-height: 320px;
+  background: #1a1a2e;
+  color: #e8e8f0;
+  font-family: system-ui, -apple-system, sans-serif;
+  font-size: 14px;
+}
+
+.app {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 24px 20px 20px;
+  gap: 12px;
+}
+
+.logo {
+  display: flex; align-items: center; justify-content: center;
+  width: 56px; height: 56px; border-radius: 14px;
+  background: rgba(127, 211, 255, 0.1); color: #7fd3ff;
+}
+
+.title {
+  font-size: 18px;
+  font-weight: 700;
+  color: #7fd3ff;
+  letter-spacing: 0.3px;
+}
+
+.sub {
+  font-size: 12px;
+  color: #888;
+  text-align: center;
+  line-height: 1.5;
+}
+
+.scan-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  padding: 10px 16px;
+  background: #0f3460;
+  border: 1px solid #1a5080;
+  color: #7fd3ff;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 600;
+  transition: background 0.15s;
+  margin-top: 4px;
+}
+.scan-btn:hover:not(:disabled) { background: #1a5080; }
+.scan-btn:disabled { opacity: 0.6; cursor: not-allowed; }
+
+.error {
+  width: 100%;
+  font-size: 12px;
+  color: #ff6b6b;
+  background: rgba(255, 107, 107, 0.1);
+  border-radius: 6px;
+  padding: 8px 10px;
+  line-height: 1.4;
+}
+
+.hint {
+  width: 100%;
+  font-size: 12px;
+  color: #666;
+  border-top: 1px solid #222;
+  padding-top: 12px;
+  line-height: 1.7;
+}
+
+.hint strong { color: #888; display: block; margin-bottom: 4px; }
+
+.hint ol { padding-left: 16px; }
+
+.settings-link {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  width: 100%;
+  margin-top: 4px;
+  padding: 7px;
+  background: none;
+  border: 1px solid #262640;
+  border-radius: 7px;
+  color: #9aa0b0;
+  font-size: 12px;
+  cursor: pointer;
+}
+.settings-link:hover { color: #7fd3ff; border-color: #1a5080; }
