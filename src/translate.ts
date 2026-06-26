@@ -268,6 +268,18 @@ export function cleanOcrText(text: string): string {
       s = s.slice(0, drop) + s.slice(drop + 1);
     }
   }
+  // Normalize CJK / fullwidth sentence enders to their ASCII forms, then keep
+  // ONLY letters, numbers, whitespace and . ! ?  — every other symbol the OCR
+  // hallucinates (。、，·~「」“”％ etc.) is dropped. Runs of dots collapse to a
+  // single ellipsis, so the only punctuation that survives is . … ! ?.
+  s = s
+    .replace(/[。．｡]/g, '.')
+    .replace(/！/g, '!')
+    .replace(/？/g, '?')
+    .replace(/[…⋯]/g, '...')
+    .replace(/[^\p{L}\p{N}\s.!?]/gu, '')
+    .replace(/\.{2,}/g, '...')
+    .replace(/\s+([.!?])/g, '$1');
   return s.replace(/\s+/g, ' ').trim();
 }
 
