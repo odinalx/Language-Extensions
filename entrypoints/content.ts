@@ -2,6 +2,7 @@ import type { ExtensionMessage, SelectionRect, AnalysisResult, WordInfo } from '
 
 let scanActive = false;
 let activePanel: ShadowRoot | null = null;
+let currentAnalysis: AnalysisResult | null = null;
 
 export default defineContentScript({
   matches: ['<all_urls>'],
@@ -29,6 +30,8 @@ const ICON = {
   refresh: `<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-3-6.7L21 8"/><path d="M21 3v5h-5"/></svg>`,
   eye: `<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7z"/><circle cx="12" cy="12" r="3"/></svg>`,
   camera: `<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h2l1.5-2h7L19 5h2a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><circle cx="13" cy="12" r="3.5"/></svg>`,
+  plus: `<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M12 9v6M9 12h6"/></svg>`,
+  send: `<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 2L11 13"/><path d="M22 2l-7 20-4-9-9-4z"/></svg>`,
 };
 
 // ---------------------------------------------------------------------------
@@ -251,6 +254,7 @@ function setPanelError(shadow: ShadowRoot, msg: string, rect?: SelectionRect) {
 
 function renderResults(shadow: ShadowRoot, analysis: AnalysisResult, rect: SelectionRect) {
   const body = shadow.querySelector('.body') as HTMLElement;
+  currentAnalysis = analysis;
 
   if (!analysis.text) {
     body.innerHTML = `
@@ -274,6 +278,7 @@ function renderResults(shadow: ShadowRoot, analysis: AnalysisResult, rect: Selec
     <button class="btn-primary speak-all">${ICON.speaker}<span>Speak phrase</span></button>
     <button class="btn-row scan-again">${ICON.camera}<span>Scan again</span></button>
     <div class="legend"></div>
+    <div class="anki-bar"></div>
   `;
 
   // Flowing Korean phrase — each word is inline, colored by POS, clickable.
@@ -310,6 +315,76 @@ function renderResults(shadow: ShadowRoot, analysis: AnalysisResult, rect: Selec
       return `<span class="legend-item"><span class="dot" style="background:${c}"></span>${esc(p)}</span>`;
     })
     .join('');
+
+  void updateAnkiBar(shadow);
+}
+
+// ---------------------------------------------------------------------------
+// Anki queue UI (footer bar of the result panel)
+// ---------------------------------------------------------------------------
+
+async function updateAnkiBar(shadow: ShadowRoot) {
+  const bar = shadow.querySelector('.anki-bar') as HTMLElement | null;
+  if (!bar) return;
+
+  let count = 0;
+  try {
+    const info = (await browser.runtime.sendMessage({
+      type: 'ANKI_QUEUE',
+    } satisfies ExtensionMessage)) as ExtensionMessage | undefined;
+    if (info && info.type === 'ANKI_QUEUE_INFO') count = info.count;
+  } catch {
+    /* background not ready — show empty bar */
+  }
+
+  if (count === 0) {
+    bar.innerHTML = `<span class="anki-count muted">No cards in the Anki queue yet</span>`;
+    return;
+  }
+
+  bar.innerHTML = `
+    <span class="anki-count">${count} card${count > 1 ? 's' : ''} queued</span>
+    <div class="anki-actions">
+      <button class="btn-row anki-send">${ICON.send}<span>Send all to Anki</span></button>
+      <button class="anki-clear" title="Clear queue">${ICON.close}</button>
+    </div>`;
+  bar.querySelector('.anki-send')!.addEventListener('click', () => sendAllToAnki(shadow));
+  bar.querySelector('.anki-clear')!.addEventListener('click', async () => {
+    await browser.runtime.sendMessage({ type: 'ANKI_CLEAR' } satisfies ExtensionMessage).catch(() => {});
+    void updateAnkiBar(shadow);
+  });
+}
+
+async function sendAllToAnki(shadow: ShadowRoot) {
+  const bar = shadow.querySelector('.anki-bar') as HTMLElement | null;
+  if (!bar) return;
+  bar.innerHTML = `<span class="anki-count muted">Sending to Anki…</span>`;
+
+  let resp: ExtensionMessage | undefined;
+  try {
+    resp = (await browser.runtime.sendMessage({
+      type: 'ANKI_SEND_ALL',
+    } satisfies ExtensionMessage)) as ExtensionMessage | undefined;
+  } catch {
+    resp = undefined;
+  }
+
+  if (!resp || resp.type !== 'ANKI_SEND_ALL_DONE') {
+    bar.innerHTML = `<span class="anki-count warn">Could not reach the extension. Try again.</span>`;
+    setTimeout(() => void updateAnkiBar(shadow), 2500);
+    return;
+  }
+
+  if (resp.ok && resp.failed === 0) {
+    bar.innerHTML = `<span class="anki-count ok">✓ Sent ${resp.added} card${resp.added > 1 ? 's' : ''} to Anki</span>`;
+  } else if (resp.added > 0) {
+    bar.innerHTML = `<span class="anki-count warn">Sent ${resp.added}, ${resp.failed} failed — ${resp.remaining} still queued.</span>`;
+    setTimeout(() => void updateAnkiBar(shadow), 3000);
+  } else {
+    const why = resp.message || 'Could not reach Anki. Open it with the AnkiConnect add-on.';
+    bar.innerHTML = `<span class="anki-count warn">${esc(why)}</span>`;
+    setTimeout(() => void updateAnkiBar(shadow), 4000);
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -334,7 +409,8 @@ function showWordPopover(shadow: ShadowRoot, anchor: HTMLElement, info: WordInfo
     ${info.meanings.length > 1
       ? `<ul class="pop-meanings">${info.meanings.slice(0, 5).map((m) => `<li>${esc(m)}</li>`).join('')}</ul>`
       : ''}
-    <a class="pop-naver" target="_blank" href="https://en.dict.naver.com/#/search?query=${encodeURIComponent(info.surface)}">
+    <button class="pop-anki">${ICON.plus}<span>Add to Anki</span></button>
+    <a class="pop-naver" target="_blank" href="https://korean.dict.naver.com/koendict/#/search?range=all&query=${encodeURIComponent(info.infinitive || info.surface)}">
       ${ICON.external}<span>Naver Dictionary</span>
     </a>
   `;
@@ -361,6 +437,40 @@ function showWordPopover(shadow: ShadowRoot, anchor: HTMLElement, info: WordInfo
 
   pop.querySelector('.pop-tts')!.addEventListener('click', () => tts(info.surface));
   pop.querySelector('.pop-close')!.addEventListener('click', () => pop.remove());
+
+  const ankiBtn = pop.querySelector('.pop-anki') as HTMLButtonElement;
+  const ankiLabel = ankiBtn.querySelector('span') as HTMLElement;
+  ankiBtn.addEventListener('click', async () => {
+    ankiBtn.disabled = true;
+    ankiLabel.textContent = 'Adding…';
+    const card = {
+      word: info.surface,
+      wordTranslation: info.translation || '',
+      meanings: info.meanings || [],
+      wordPos: info.pos || '',
+      infinitive: info.infinitive,
+      sentence: currentAnalysis?.text || '',
+      sentenceTranslation: currentAnalysis?.sentenceTranslation || '',
+    };
+    let resp: ExtensionMessage | undefined;
+    try {
+      resp = (await browser.runtime.sendMessage({
+        type: 'ANKI_ADD', card,
+      } satisfies ExtensionMessage)) as ExtensionMessage | undefined;
+    } catch {
+      resp = undefined;
+    }
+    if (resp && resp.type === 'ANKI_ADD_DONE' && resp.ok) {
+      ankiBtn.classList.add('done');
+      ankiLabel.textContent = resp.sentNow ? 'Sent to Anki ✓' : 'Queued ✓';
+    } else {
+      ankiBtn.classList.add('warn');
+      ankiLabel.textContent =
+        resp && resp.type === 'ANKI_ADD_DONE' ? (resp.message || 'Kept in queue') : 'Failed — try again';
+      ankiBtn.disabled = false;
+    }
+    void updateAnkiBar(shadow);
+  });
 
   // Close on outside click.
   const onDoc = (e: MouseEvent) => {
@@ -524,6 +634,35 @@ const STYLES = `
   .legend { display: flex; flex-wrap: wrap; gap: 8px; padding-top: 2px; }
   .legend-item { display: flex; align-items: center; gap: 4px; font-size: 10px; color: #888; }
   .dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+
+  .anki-bar {
+    display: flex; align-items: center; justify-content: space-between; gap: 8px;
+    margin-top: 4px; padding-top: 10px; border-top: 1px solid #2c3252;
+    flex-wrap: wrap;
+  }
+  .anki-count { font-size: 11px; color: #c0c6da; }
+  .anki-count.muted { color: #777; }
+  .anki-count.ok { color: #51cf66; }
+  .anki-count.warn { color: #ffa94d; line-height: 1.4; }
+  .anki-actions { display: flex; align-items: center; gap: 6px; }
+  .anki-bar .anki-send { width: auto; padding: 5px 10px; font-size: 12px; }
+  .anki-clear {
+    display: flex; background: none; border: none; color: #777; cursor: pointer;
+    padding: 3px; border-radius: 5px;
+  }
+  .anki-clear:hover { color: #ff6b6b; background: rgba(255,255,255,0.08); }
+
+  .pop-anki {
+    display: flex; align-items: center; justify-content: center; gap: 6px;
+    width: 100%; padding: 6px 10px; cursor: pointer; font-size: 12px;
+    border-radius: 6px; font-family: inherit;
+    background: #0f3460; border: 1px solid #1a5080; color: #7fd3ff;
+    margin-top: 2px;
+  }
+  .pop-anki:hover:not(:disabled) { background: #1a5080; }
+  .pop-anki:disabled { cursor: default; opacity: 0.9; }
+  .pop-anki.done { background: rgba(81,207,102,0.14); border-color: #51cf66; color: #51cf66; }
+  .pop-anki.warn { background: rgba(255,169,77,0.14); border-color: #ffa94d; color: #ffa94d; }
 
   .popover {
     position: fixed; width: 240px; z-index: 2147483647;

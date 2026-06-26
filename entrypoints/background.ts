@@ -1,8 +1,9 @@
-import type { ExtensionMessage, SelectionRect } from '../src/types';
+import type { AnkiCardDraft, ExtensionMessage, SelectionRect } from '../src/types';
 import { analyze } from '../src/translate';
 import { getSettings, hasOcrCreds, hasVoiceCreds } from '../src/settings';
 import { clovaOcr, clovaTts } from '../src/clova';
 import { naverWordAudioUrl } from '../src/naver';
+import { sendCardsToAnki } from '../src/anki';
 import type { Settings } from '../src/types';
 
 const OFFSCREEN_URL = 'offscreen.html';
@@ -127,7 +128,148 @@ export default defineBackground(() => {
       return true;
     }
   );
+
+  // --- Anki card queue (session list) + AnkiConnect delivery ---
+  browser.runtime.onMessage.addListener(
+    (msg: unknown, _sender, sendResponse): boolean => {
+      const message = msg as ExtensionMessage;
+      if (
+        message.type !== 'ANKI_ADD' &&
+        message.type !== 'ANKI_SEND_ALL' &&
+        message.type !== 'ANKI_QUEUE' &&
+        message.type !== 'ANKI_CLEAR'
+      ) {
+        return false;
+      }
+
+      (async () => {
+        try {
+          const settings = await getSettings();
+
+          if (message.type === 'ANKI_QUEUE') {
+            const queue = await getQueue();
+            sendResponse({
+              type: 'ANKI_QUEUE_INFO',
+              count: queue.length,
+              autoSend: settings.ankiAutoSend,
+            } satisfies ExtensionMessage);
+            return;
+          }
+
+          if (message.type === 'ANKI_CLEAR') {
+            await setQueue([]);
+            sendResponse({ type: 'ANKI_CLEAR_DONE', ok: true } satisfies ExtensionMessage);
+            return;
+          }
+
+          if (message.type === 'ANKI_ADD') {
+            const card: AnkiCardDraft = {
+              ...message.card,
+              id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+              addedAt: Date.now(),
+            };
+
+            // Auto-send mode: push straight into Anki; if that fails, keep the
+            // card in the queue so it's never lost.
+            if (settings.ankiAutoSend) {
+              try {
+                const r = await sendCardsToAnki(settings, [card], (t) => audioOrNull(t, settings));
+                if (r.addedIds.length > 0) {
+                  const queue = await getQueue();
+                  sendResponse({
+                    type: 'ANKI_ADD_DONE', ok: true, queued: queue.length, sentNow: true,
+                  } satisfies ExtensionMessage);
+                  return;
+                }
+                throw new Error(r.failures[0] || 'Anki did not accept the card');
+              } catch (e) {
+                const queue = [...(await getQueue()), card];
+                await setQueue(queue);
+                sendResponse({
+                  type: 'ANKI_ADD_DONE', ok: false, queued: queue.length, sentNow: false,
+                  message: `Kept in queue — Anki send failed: ${describe(e)}`,
+                } satisfies ExtensionMessage);
+                return;
+              }
+            }
+
+            const queue = [...(await getQueue()), card];
+            await setQueue(queue);
+            sendResponse({
+              type: 'ANKI_ADD_DONE', ok: true, queued: queue.length, sentNow: false,
+            } satisfies ExtensionMessage);
+            return;
+          }
+
+          // ANKI_SEND_ALL
+          const queue = await getQueue();
+          if (queue.length === 0) {
+            sendResponse({
+              type: 'ANKI_SEND_ALL_DONE', ok: true, added: 0, failed: 0, remaining: 0,
+            } satisfies ExtensionMessage);
+            return;
+          }
+          const result = await sendCardsToAnki(settings, queue, (t) => audioOrNull(t, settings));
+          const remaining = queue.filter((c) => !result.addedIds.includes(c.id));
+          await setQueue(remaining);
+          sendResponse({
+            type: 'ANKI_SEND_ALL_DONE',
+            ok: result.failed === 0,
+            added: result.addedIds.length,
+            failed: result.failed,
+            remaining: remaining.length,
+            message: result.failures[0],
+          } satisfies ExtensionMessage);
+        } catch (e) {
+          console.error('[Korean Reader] Anki op failed:', e);
+          if (message.type === 'ANKI_SEND_ALL') {
+            const queue = await getQueue();
+            sendResponse({
+              type: 'ANKI_SEND_ALL_DONE', ok: false, added: 0, failed: queue.length,
+              remaining: queue.length, message: describe(e),
+            } satisfies ExtensionMessage);
+          } else if (message.type === 'ANKI_ADD') {
+            sendResponse({
+              type: 'ANKI_ADD_DONE', ok: false, queued: (await getQueue()).length,
+              sentNow: false, message: describe(e),
+            } satisfies ExtensionMessage);
+          } else if (message.type === 'ANKI_CLEAR') {
+            sendResponse({ type: 'ANKI_CLEAR_DONE', ok: false } satisfies ExtensionMessage);
+          } else {
+            sendResponse({ type: 'ANKI_QUEUE_INFO', count: 0, autoSend: false } satisfies ExtensionMessage);
+          }
+        }
+      })();
+
+      return true;
+    }
+  );
 });
+
+// ---------------------------------------------------------------------------
+// Anki queue persistence
+// ---------------------------------------------------------------------------
+
+const ANKI_QUEUE_KEY = 'ankiQueue';
+
+async function getQueue(): Promise<AnkiCardDraft[]> {
+  const stored = await chrome.storage.local.get(ANKI_QUEUE_KEY);
+  return (stored[ANKI_QUEUE_KEY] as AnkiCardDraft[] | undefined) ?? [];
+}
+
+async function setQueue(queue: AnkiCardDraft[]): Promise<void> {
+  await chrome.storage.local.set({ [ANKI_QUEUE_KEY]: queue });
+}
+
+// resolveTtsAudio wrapper that never throws — returns null when no audio.
+async function audioOrNull(text: string, settings: Settings): Promise<string | null> {
+  try {
+    return await resolveTtsAudio(text, settings);
+  } catch (e) {
+    console.warn('[Korean Reader] audio for Anki card failed:', e);
+    return null;
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Local OCR (Tesseract in the offscreen document)

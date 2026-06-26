@@ -13,6 +13,10 @@ export interface Settings {
   voiceApiKeyId: string;  // Clova Voice X-NCP-APIGW-API-KEY-ID
   voiceApiKey: string;    // Clova Voice X-NCP-APIGW-API-KEY
   voiceSpeaker: string;   // e.g. "nara"
+  // Anki (via the AnkiConnect add-on running in desktop Anki).
+  ankiConnectUrl: string; // e.g. "http://127.0.0.1:8765"
+  ankiDeck: string;       // target deck name
+  ankiAutoSend: boolean;  // push each card to Anki immediately instead of queueing
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -21,7 +25,23 @@ export const DEFAULT_SETTINGS: Settings = {
   voiceApiKeyId: '',
   voiceApiKey: '',
   voiceSpeaker: 'nara',
+  ankiConnectUrl: 'http://127.0.0.1:8765',
+  ankiDeck: 'Korean Reader',
+  ankiAutoSend: false,
 };
+
+// One Anki card waiting in the session queue (or being sent directly).
+export interface AnkiCardDraft {
+  id: string;                  // unique queue id
+  word: string;                // Korean word (card front)
+  wordTranslation: string;     // primary English meaning
+  meanings: string[];          // additional meanings
+  wordPos: string;             // part of speech (may be '')
+  infinitive?: string;         // dictionary form for verbs/adjectives
+  sentence: string;            // the scanned sentence (example)
+  sentenceTranslation: string; // its translation
+  addedAt: number;             // timestamp
+}
 
 // Per-word analysis (translation + grammar).
 export interface WordInfo {
@@ -100,6 +120,51 @@ export interface TtsPlay {
   audioDataUrl: string;
 }
 
+// content -> background: queue a card (auto-sends to Anki if that's enabled)
+export interface AnkiAddRequest {
+  type: 'ANKI_ADD';
+  card: Omit<AnkiCardDraft, 'id' | 'addedAt'>;
+}
+export interface AnkiAddDone {
+  type: 'ANKI_ADD_DONE';
+  ok: boolean;
+  queued: number;   // queue size after the operation
+  sentNow: boolean; // true if it went straight into Anki (auto-send)
+  message?: string;
+}
+
+// content/popup -> background: flush the whole queue into Anki
+export interface AnkiSendAllRequest {
+  type: 'ANKI_SEND_ALL';
+}
+export interface AnkiSendAllDone {
+  type: 'ANKI_SEND_ALL_DONE';
+  ok: boolean;
+  added: number;
+  failed: number;
+  remaining: number; // cards still queued (the failures)
+  message?: string;
+}
+
+// content/popup -> background: read the queue state
+export interface AnkiQueueQuery {
+  type: 'ANKI_QUEUE';
+}
+export interface AnkiQueueInfo {
+  type: 'ANKI_QUEUE_INFO';
+  count: number;
+  autoSend: boolean;
+}
+
+// content/popup -> background: empty the queue
+export interface AnkiClearRequest {
+  type: 'ANKI_CLEAR';
+}
+export interface AnkiClearDone {
+  type: 'ANKI_CLEAR_DONE';
+  ok: boolean;
+}
+
 export type ExtensionMessage =
   | ActivateScan
   | CaptureRequest
@@ -111,4 +176,12 @@ export type ExtensionMessage =
   | OcrProgress
   | TtsRequest
   | TtsDone
-  | TtsPlay;
+  | TtsPlay
+  | AnkiAddRequest
+  | AnkiAddDone
+  | AnkiSendAllRequest
+  | AnkiSendAllDone
+  | AnkiQueueQuery
+  | AnkiQueueInfo
+  | AnkiClearRequest
+  | AnkiClearDone;
