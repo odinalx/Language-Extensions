@@ -47,7 +47,7 @@ function posColor(pos: string): string {
     case 'conjunction': return '#fcc419'; // gold
     case 'interjection': return '#ff922b';// deep orange
     case 'determiner': return '#94d82d';  // lime
-    default: return '#cc5de8';            // vivid orchid (never gray/white/pale)
+    default: return '#adb5bd';            // neutral grey — word not classified
   }
 }
 
