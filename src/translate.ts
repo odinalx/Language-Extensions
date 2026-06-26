@@ -13,10 +13,32 @@ function url(params: Record<string, string>, extraDt: string[] = []): string {
   return `${ENDPOINT}?${q.toString()}`;
 }
 
+// Part-of-speech labels come back in the *interface* language (hl), which Google
+// infers from locale when unset — that's why a French user got "nom"/"adjectif"
+// (which then matched no English posColor case and fell through to grey). Map any
+// stray non-English label back to the canonical English key.
+const POS_ALIASES: Record<string, string> = {
+  nom: 'noun', substantif: 'noun',
+  verbe: 'verb',
+  adjectif: 'adjective',
+  adverbe: 'adverb',
+  pronom: 'pronoun',
+  préposition: 'preposition', preposition: 'preposition',
+  conjonction: 'conjunction',
+  déterminant: 'determiner', determinant: 'determiner', article: 'determiner',
+  numéral: 'numeral', numéro: 'numeral',
+  particule: 'particle',
+};
+
+function normalizePos(raw: string): string {
+  const p = raw.trim().toLowerCase();
+  return POS_ALIASES[p] ?? p;
+}
+
 // Whole-phrase translation.
 async function translateSentence(text: string): Promise<string> {
   const res = await fetch(
-    url({ client: 'gtx', sl: 'ko', tl: 'en', dt: 't', q: text })
+    url({ client: 'gtx', sl: 'ko', tl: 'en', hl: 'en', dt: 't', q: text })
   );
   if (!res.ok) throw new Error(`Translate HTTP ${res.status}`);
   const data = await res.json();
@@ -59,7 +81,7 @@ interface BdResult {
 
 async function queryBd(word: string): Promise<BdResult> {
   const res = await fetch(
-    url({ client: 'gtx', sl: 'ko', tl: 'en', dt: 't', q: word }, ['bd'])
+    url({ client: 'gtx', sl: 'ko', tl: 'en', hl: 'en', dt: 't', q: word }, ['bd'])
   );
   if (!res.ok) throw new Error(`Lookup HTTP ${res.status}`);
   const data = await res.json();
@@ -70,7 +92,7 @@ async function queryBd(word: string): Promise<BdResult> {
   const meanings: string[] = [];
   const dict = data?.[1];
   if (Array.isArray(dict) && dict.length > 0) {
-    pos = String(dict[0]?.[0] ?? '').toLowerCase();
+    pos = normalizePos(String(dict[0]?.[0] ?? ''));
     for (const group of dict) {
       for (const m of group?.[1] ?? []) {
         if (typeof m === 'string' && !meanings.includes(m)) meanings.push(m);
@@ -96,6 +118,29 @@ async function lookupWord(word: string): Promise<WordInfo> {
   let meanings: string[] = [];
 
   const primary = await queryBd(c);
+
+  // -기 nominalized verbs (보호하기 "protecting", 먹기 "eating") come back tagged
+  // as 'noun' because -기 makes a verb function as a nominal. If the de-nominalized
+  // form (보호하다, 먹다) is actually a verb/adjective in the dictionary, prefer that
+  // — verifying via lookup avoids misfiring on true 기-nouns (경기, 일기).
+  if ((primary.pos === 'noun' || primary.pos === '') && c.length >= 2 && c.endsWith('기')) {
+    const cand = c.slice(0, -1) + '다';
+    try {
+      const v = await queryBd(cand);
+      if (v.pos === 'verb' || v.pos === 'adjective') {
+        return {
+          surface: word,
+          translation: primary.translation || v.translation,
+          pos: v.pos,
+          meanings: primary.meanings.length ? primary.meanings : v.meanings,
+          infinitive: cand,
+        };
+      }
+    } catch {
+      /* ignore, fall through to normal handling */
+    }
+  }
+
   if (primary.pos) {
     translation = primary.translation;
     pos = primary.pos;
@@ -166,7 +211,7 @@ async function mapLimit<T, R>(items: T[], limit: number, fn: (t: T) => Promise<R
 // Per-word cache in chrome.storage.local keyed by the surface form.
 // Bump the prefix whenever the analysis output shape changes so stale entries
 // (e.g. cached before POS detection improved) are ignored.
-const CACHE_PREFIX = 'wkr3:';
+const CACHE_PREFIX = 'wkr5:';
 
 async function getCache(words: string[]): Promise<Record<string, WordInfo>> {
   const keys = words.map((w) => `${CACHE_PREFIX}${w}`);
@@ -211,6 +256,9 @@ function removeUnmatchedPair(s: string, open: string, close: string): string {
 
 export function cleanOcrText(text: string): string {
   let s = text.replace(/\s+/g, ' ').trim();
+  // Underscores are an OCR artifact (underlines / panel borders), never real
+  // Korean text — drop them.
+  s = s.replace(/_+/g, ' ');
   for (const [open, close] of BRACKET_PAIRS) s = removeUnmatchedPair(s, open, close);
   for (const q of SYMMETRIC_QUOTES) {
     const positions: number[] = [];
