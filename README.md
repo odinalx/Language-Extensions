@@ -12,6 +12,22 @@ Everything works free and locally — no account, no paid services.
 
 ---
 
+## Contents
+
+- [What it is & why](#what-it-is--why)
+- [How it works](#how-it-works)
+  - [Word colors](#word-colors)
+- [Install](#install)
+  - [Option A — Download & unpack](#option-a--download--unpack-no-build-needed)
+  - [Option B — Build from source](#option-b--build-from-source)
+- [How to use](#how-to-use)
+- [Anki setup](#anki-setup-one-time)
+- [Technology](#technology)
+- [Development](#development)
+- [Optional: Naver Cloud](#optional-naver-cloud-paid-off-by-default)
+
+---
+
 ## What it is & why
 
 Reading webtoons is a great way to learn Korean, but the text lives inside images,
