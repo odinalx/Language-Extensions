@@ -1,6 +1,6 @@
 {
   "name": "webtoon-korean-reader",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "type": "module",
   "scripts": {
     "postinstall": "node scripts/copy-assets.mjs && wxt prepare",

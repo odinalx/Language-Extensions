@@ -5,7 +5,12 @@ export default defineConfig({
   manifest: {
     name: 'Webtoon Korean Reader',
     description: 'OCR + dictionary helper for Korean webtoons',
-    version: '0.1.0',
+    version: '0.1.1',
+    // Tesseract compiles a .wasm core; MV3's default CSP (script-src 'self')
+    // blocks WebAssembly.instantiate. 'wasm-unsafe-eval' re-allows it.
+    content_security_policy: {
+      extension_pages: "script-src 'self' 'wasm-unsafe-eval'; object-src 'self';",
+    },
     permissions: ['activeTab', 'scripting', 'storage', 'tabs', 'offscreen'],
     host_permissions: [
       'https://translate.googleapis.com/*',
