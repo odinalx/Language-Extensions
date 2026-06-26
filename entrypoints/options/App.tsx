@@ -24,10 +24,11 @@ export function App() {
     <div className="page">
       <h1>Korean Reader — Settings</h1>
       <p className="lead">
-        Optional. Leave blank to use the free defaults (Tesseract OCR + Google voice).
-        Add Naver Cloud keys for higher-quality Korean OCR and a natural Korean voice.
+        Set up sending words to Anki. The reader works out of the box with free
+        OCR and voice — no keys needed.
       </p>
 
+      {SHOW_NAVER_CLOUD && (<>
       <section>
         <div className="sec-head">
           <h2>CLOVA OCR</h2>
@@ -102,6 +103,60 @@ export function App() {
           </select>
         </label>
       </section>
+      </>)}
+
+      <section>
+        <div className="sec-head">
+          <h2>Anki cards</h2>
+          <span className="badge on">AnkiConnect</span>
+        </div>
+        <p className="hint">
+          Add words and example sentences to <strong>Anki</strong> straight from the
+          result panel. Requires desktop Anki running with the free{' '}
+          <a href="https://ankiweb.net/shared/info/2055492159" target="_blank" rel="noreferrer">
+            AnkiConnect
+          </a>{' '}
+          add-on. <strong>One-time setup:</strong> in Anki, open{' '}
+          <em>Tools → Add-ons → AnkiConnect → Config</em> and add this extension's
+          origin to <code>webCorsOriginList</code>:
+        </p>
+        <pre className="origin-box">
+{`"webCorsOriginList": [
+    "http://localhost",
+    "${extensionOrigin}"
+]`}
+        </pre>
+        <label>
+          AnkiConnect URL
+          <input
+            type="text"
+            placeholder="http://127.0.0.1:8765"
+            value={settings.ankiConnectUrl}
+            onChange={(e) => update({ ankiConnectUrl: e.target.value })}
+          />
+        </label>
+        <label>
+          Deck name
+          <input
+            type="text"
+            placeholder="Korean Reader"
+            value={settings.ankiDeck}
+            onChange={(e) => update({ ankiDeck: e.target.value })}
+          />
+          <span className="field-hint">
+            Cards use a “Korean Reader” note type that the extension creates
+            automatically (Vocab, English, sound, 4 dictionaries, example sentence).
+          </span>
+        </label>
+        <label className="checkbox">
+          <input
+            type="checkbox"
+            checked={settings.ankiAutoSend}
+            onChange={(e) => update({ ankiAutoSend: e.target.checked })}
+          />
+          Send each card to Anki immediately (otherwise they wait in a queue you flush with “Send all to Anki”).
+        </label>
+      </section>
 
       <div className="actions">
         <button className="save" onClick={onSave}>Save</button>
@@ -110,3 +165,9 @@ export function App() {
     </div>
   );
 }
+
+const extensionOrigin = `chrome-extension://${chrome.runtime.id}`;
+
+// Naver Cloud (CLOVA OCR / Clova Voice) settings are set aside for now — the code
+// stays but the UI is hidden. Flip to true to bring the sections back.
+const SHOW_NAVER_CLOUD = false;
