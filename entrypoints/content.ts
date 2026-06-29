@@ -1,4 +1,5 @@
 import type { ExtensionMessage, SelectionRect, AnalysisResult, WordInfo } from '../src/types';
+import { romanize } from '../src/romanize';
 
 let scanActive = false;
 let activePanel: ShadowRoot | null = null;
@@ -84,7 +85,7 @@ function activateScan() {
 
   const selBox = el('div', {
     position: 'fixed', display: 'none',
-    border: '2px dashed #fff', background: 'rgba(255,255,255,0.08)',
+    border: '2px dashed #00c73c', background: 'rgba(0,199,60,0.10)',
     zIndex: '2147483646', pointerEvents: 'none', boxSizing: 'border-box',
   });
 
@@ -259,13 +260,16 @@ function renderResults(shadow: ShadowRoot, analysis: AnalysisResult, rect: Selec
   if (!analysis.text) {
     body.innerHTML = `
       <div class="status">No text detected. Try a cleaner crop.</div>
-      <button class="btn-primary scan-again">${ICON.camera}<span>Scan again</span></button>`;
+      <button class="btn-primary scan-again">${ICON.camera}<span>Scan other</span></button>`;
     body.querySelector('.scan-again')!.addEventListener('click', () => activateScan());
     return;
   }
 
   body.innerHTML = `
-    <div class="phrase"></div>
+    <div class="phrase-row">
+      <div class="phrase"></div>
+      <button class="speak-all" title="Speak phrase">${ICON.speaker}</button>
+    </div>
     <button class="btn-row toggle-tr">
       ${ICON.eye}<span class="toggle-label">Show translation</span>
     </button>
@@ -275,21 +279,26 @@ function renderResults(shadow: ShadowRoot, analysis: AnalysisResult, rect: Selec
         : '<span class="muted">(translation unavailable)</span>'}
       ${analysis.tone ? `<div class="tone">tone: ${esc(analysis.tone)}</div>` : ''}
     </div>
-    <button class="btn-primary speak-all">${ICON.speaker}<span>Speak phrase</span></button>
-    <button class="btn-row scan-again">${ICON.camera}<span>Scan again</span></button>
+    <button class="btn-row scan-again">${ICON.camera}<span>Scan other</span></button>
     <div class="legend"></div>
     <div class="anki-bar"></div>
   `;
 
-  // Flowing Korean phrase — each word is inline, colored by POS, clickable.
+  // Flowing Korean phrase — each word is marked with POS-colored dots
+  // underneath (not recolored text) and highlights on click.
   const phraseEl = body.querySelector('.phrase') as HTMLElement;
   analysis.words.forEach((info, i) => {
     const color = posColor(info.pos);
     const w = document.createElement('span');
     w.className = 'w';
     w.textContent = info.surface;
-    w.style.color = color;
-    w.addEventListener('click', () => showWordPopover(shadow, w, info));
+    w.style.setProperty('--c', color);            // dot color
+    w.style.setProperty('--c-soft', hexA(color, 0.18)); // active highlight bg
+    w.addEventListener('click', () => {
+      phraseEl.querySelectorAll('.w.active').forEach((e) => e.classList.remove('active'));
+      w.classList.add('active');
+      showWordPopover(shadow, w, info);
+    });
     phraseEl.appendChild(w);
     if (i < analysis.words.length - 1) phraseEl.appendChild(document.createTextNode(' '));
   });
@@ -395,23 +404,32 @@ function showWordPopover(shadow: ShadowRoot, anchor: HTMLElement, info: WordInfo
   shadow.querySelector('.popover')?.remove();
 
   const color = posColor(info.pos);
+  const sentence = currentAnalysis?.text || '';
+  const sentenceTr = currentAnalysis?.sentenceTranslation || '';
   const pop = document.createElement('div');
   pop.className = 'popover';
   pop.innerHTML = `
     <div class="pop-head">
       <span class="pop-word">${esc(info.surface)}</span>
-      <button class="pop-tts" title="Pronounce">${ICON.speaker}</button>
+      ${info.pos ? `<span class="pop-badge">${esc(info.pos)}</span>` : ''}
       <button class="pop-close" title="Close">${ICON.close}</button>
     </div>
-    ${info.pos ? `<span class="pos-tag" style="color:${color};border-color:${hexA(color, 0.5)};background:${hexA(color, 0.12)}">${esc(info.pos)}</span>` : ''}
+    <div class="pop-rom">
+      <button class="pop-tts" title="Pronounce">${ICON.speaker}</button>
+      <span class="pop-rom-text">[${esc(romanize(info.surface))}]</span>
+    </div>
     <div class="pop-trans">${info.translation ? esc(info.translation) : '<span class="muted">no translation</span>'}</div>
     ${info.infinitive ? `<div class="pop-inf">dictionary form: <b>${esc(info.infinitive)}</b></div>` : ''}
     ${info.meanings.length > 1
       ? `<ul class="pop-meanings">${info.meanings.slice(0, 5).map((m) => `<li>${esc(m)}</li>`).join('')}</ul>`
       : ''}
-    <button class="pop-anki">${ICON.plus}<span>Add to Anki</span></button>
+    ${sentence ? `<div class="pop-example">
+      <div class="pop-example-ko">${highlightWord(sentence, info.surface, color)}</div>
+      ${sentenceTr ? `<div class="pop-example-en">${esc(`“${sentenceTr}”`)}</div>` : ''}
+    </div>` : ''}
+    <button class="pop-flash">${ICON.plus}<span>Add to flashcards</span></button>
     <a class="pop-naver" target="_blank" href="https://korean.dict.naver.com/koendict/#/search?range=all&query=${encodeURIComponent(info.infinitive || info.surface)}">
-      ${ICON.external}<span>Naver Dictionary</span>
+      ${ICON.external}<span>Open in Naver Dictionary</span>
     </a>
   `;
   shadow.appendChild(pop);
@@ -435,10 +453,15 @@ function showWordPopover(shadow: ShadowRoot, anchor: HTMLElement, info: WordInfo
   pop.style.left = `${left}px`;
   pop.style.top = `${top}px`;
 
-  pop.querySelector('.pop-tts')!.addEventListener('click', () => tts(info.surface));
-  pop.querySelector('.pop-close')!.addEventListener('click', () => pop.remove());
+  const dismiss = () => {
+    anchor.classList.remove('active');
+    pop.remove();
+  };
 
-  const ankiBtn = pop.querySelector('.pop-anki') as HTMLButtonElement;
+  pop.querySelector('.pop-tts')!.addEventListener('click', () => tts(info.surface));
+  pop.querySelector('.pop-close')!.addEventListener('click', dismiss);
+
+  const ankiBtn = pop.querySelector('.pop-flash') as HTMLButtonElement;
   const ankiLabel = ankiBtn.querySelector('span') as HTMLElement;
   ankiBtn.addEventListener('click', async () => {
     ankiBtn.disabled = true;
@@ -476,11 +499,20 @@ function showWordPopover(shadow: ShadowRoot, anchor: HTMLElement, info: WordInfo
   const onDoc = (e: MouseEvent) => {
     const path = e.composedPath();
     if (!path.includes(pop) && !path.includes(anchor)) {
-      pop.remove();
+      dismiss();
       document.removeEventListener('mousedown', onDoc);
     }
   };
   setTimeout(() => document.addEventListener('mousedown', onDoc), 0);
+}
+
+// Wrap occurrences of `word` in the sentence with a POS-colored highlight span.
+function highlightWord(sentence: string, word: string, color: string): string {
+  const safe = esc(sentence);
+  if (!word) return safe;
+  return safe
+    .split(esc(word))
+    .join(`<span class="pop-hl" style="background:${hexA(color, 0.22)}">${esc(word)}</span>`);
 }
 
 // ---------------------------------------------------------------------------
@@ -561,11 +593,24 @@ function makeDraggable(host: HTMLElement, handle: HTMLElement) {
 // ---------------------------------------------------------------------------
 
 const STYLES = `
+  :host {
+    --wkr-green: #00c73c;
+    --wkr-green-strong: #00a030;
+    --wkr-green-soft: rgba(0,199,60,0.12);
+    --wkr-bg: #ffffff;
+    --wkr-surface: #f5f6f8;
+    --wkr-text: #1a1a1a;
+    --wkr-muted: #6b7280;
+    --wkr-border: #e5e7eb;
+    --wkr-ink: #1a1a1a;
+    --wkr-error: #e5484d;
+  }
   .panel {
-    background: #1a1a2e;
-    color: #e8e8f0;
-    border-radius: 12px;
-    box-shadow: 0 8px 32px rgba(0,0,0,0.5);
+    background: var(--wkr-bg);
+    color: var(--wkr-text);
+    border: 1px solid var(--wkr-border);
+    border-radius: 14px;
+    box-shadow: 0 12px 36px rgba(0,0,0,0.16);
     overflow: hidden;
     display: flex;
     flex-direction: column;
@@ -573,123 +618,159 @@ const STYLES = `
   }
   .header {
     display: flex; align-items: center; justify-content: space-between;
-    padding: 10px 14px;
-    background: #16213e;
-    border-bottom: 1px solid #0f3460;
+    padding: 11px 14px;
+    background: var(--wkr-bg);
+    border-bottom: 1px solid var(--wkr-border);
     user-select: none;
   }
   .title {
     display: flex; align-items: center; gap: 7px;
-    font-size: 13px; font-weight: 600; color: #7fd3ff; letter-spacing: 0.4px;
+    font-size: 13px; font-weight: 700; color: var(--wkr-green-strong); letter-spacing: 0.3px;
   }
   .close {
-    display: flex; background: none; border: none; color: #888; cursor: pointer;
-    padding: 3px; border-radius: 4px;
+    display: flex; background: none; border: none; color: var(--wkr-muted); cursor: pointer;
+    padding: 3px; border-radius: 5px;
   }
-  .close:hover { color: #fff; background: rgba(255,255,255,0.1); }
+  .close:hover { color: var(--wkr-text); background: var(--wkr-surface); }
   .body {
     padding: 12px; overflow-y: auto; flex: 1;
     display: flex; flex-direction: column; gap: 10px;
   }
-  .status { color: #888; font-size: 13px; text-align: center; padding: 16px 0; }
-  .muted { color: #777; }
+  .status { color: var(--wkr-muted); font-size: 13px; text-align: center; padding: 16px 0; }
+  .muted { color: var(--wkr-muted); }
   .error {
-    color: #ff6b6b; font-size: 13px; padding: 8px;
-    background: rgba(255,107,107,0.1); border-radius: 6px;
+    color: var(--wkr-error); font-size: 13px; padding: 8px;
+    background: rgba(229,72,77,0.08); border-radius: 8px;
     line-height: 1.5; word-break: break-word;
   }
-  .progress { width: 100%; height: 6px; background: rgba(255,255,255,0.1); border-radius: 3px; overflow: hidden; }
-  .progress-bar { height: 100%; background: #7fd3ff; border-radius: 3px; transition: width 0.2s ease; }
-  .progress-pct { font-size: 11px; color: #888; text-align: center; }
+  .progress { width: 100%; height: 6px; background: var(--wkr-surface); border-radius: 3px; overflow: hidden; }
+  .progress-bar { height: 100%; background: var(--wkr-green); border-radius: 3px; transition: width 0.2s ease; }
+  .progress-pct { font-size: 11px; color: var(--wkr-muted); text-align: center; }
 
+  .phrase-row {
+    display: flex; align-items: flex-start; gap: 8px;
+    background: var(--wkr-surface); border-radius: 10px; padding: 12px;
+  }
   .phrase {
-    font-size: 19px; line-height: 1.7; font-weight: 500;
-    padding: 12px; background: rgba(255,255,255,0.04); border-radius: 8px;
+    flex: 1;
+    font-size: 19px; line-height: 2; font-weight: 500; color: var(--wkr-text);
+    padding-top: 2px;
     word-break: keep-all;
   }
-  .w { cursor: pointer; border-bottom: 1px dotted transparent; }
-  .w:hover { border-bottom-color: currentColor; }
+  .speak-all {
+    flex: none; display: flex; align-items: center; justify-content: center;
+    background: var(--wkr-bg); border: 1px solid var(--wkr-border);
+    color: var(--wkr-muted); cursor: pointer; padding: 6px; border-radius: 8px;
+  }
+  .speak-all:hover { color: var(--wkr-green-strong); border-color: var(--wkr-green); }
+  .w {
+    cursor: pointer; padding: 2px 3px 7px; border-radius: 5px;
+    background-image: radial-gradient(circle, var(--c, var(--wkr-muted)) 1.6px, transparent 1.9px);
+    background-size: 7px 7px;
+    background-repeat: repeat-x;
+    background-position: left bottom 1px;
+    transition: background-color 0.12s ease;
+  }
+  .w:hover { background-color: var(--c-soft, var(--wkr-green-soft)); }
+  .w.active { background-color: var(--c-soft, var(--wkr-green-soft)); }
 
   .translation {
-    font-size: 15px; line-height: 1.5; color: #f0f0f8; font-weight: 500;
-    padding: 10px; background: rgba(127,211,255,0.07); border-radius: 8px;
+    font-size: 15px; line-height: 1.5; color: var(--wkr-text); font-weight: 500;
+    padding: 10px; background: var(--wkr-green-soft); border-radius: 8px;
   }
   .translation.hidden { display: none; }
-  .tone { font-size: 11px; color: #9aa0b0; margin-top: 6px; font-weight: 400; }
+  .tone { font-size: 11px; color: var(--wkr-muted); margin-top: 6px; font-weight: 400; }
 
   .btn-primary, .btn-row {
     display: flex; align-items: center; justify-content: center; gap: 6px;
-    width: 100%; padding: 7px 12px; cursor: pointer; font-size: 13px;
-    border-radius: 7px; font-family: inherit;
+    width: 100%; padding: 8px 12px; cursor: pointer; font-size: 13px; font-weight: 600;
+    border-radius: 8px; font-family: inherit;
   }
   .btn-primary {
-    background: #0f3460; border: 1px solid #1a5080; color: #7fd3ff;
+    background: var(--wkr-green); border: 1px solid var(--wkr-green); color: #fff;
   }
-  .btn-primary:hover { background: #1a5080; }
+  .btn-primary:hover { background: var(--wkr-green-strong); border-color: var(--wkr-green-strong); }
   .btn-row {
-    background: none; border: 1px dashed #2c3252; color: #9aa0b0;
+    background: none; border: 1px solid var(--wkr-border); color: var(--wkr-muted); font-weight: 500;
   }
-  .btn-row:hover { color: #7fd3ff; border-color: #1a5080; }
+  .btn-row:hover { color: var(--wkr-green-strong); border-color: var(--wkr-green); }
 
   .legend { display: flex; flex-wrap: wrap; gap: 8px; padding-top: 2px; }
-  .legend-item { display: flex; align-items: center; gap: 4px; font-size: 10px; color: #888; }
+  .legend-item { display: flex; align-items: center; gap: 4px; font-size: 10px; color: var(--wkr-muted); }
   .dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
 
   .anki-bar {
     display: flex; align-items: center; justify-content: space-between; gap: 8px;
-    margin-top: 4px; padding-top: 10px; border-top: 1px solid #2c3252;
+    margin-top: 4px; padding-top: 10px; border-top: 1px solid var(--wkr-border);
     flex-wrap: wrap;
   }
-  .anki-count { font-size: 11px; color: #c0c6da; }
-  .anki-count.muted { color: #777; }
-  .anki-count.ok { color: #51cf66; }
-  .anki-count.warn { color: #ffa94d; line-height: 1.4; }
+  .anki-count { font-size: 11px; color: var(--wkr-muted); }
+  .anki-count.muted { color: var(--wkr-muted); }
+  .anki-count.ok { color: var(--wkr-green-strong); }
+  .anki-count.warn { color: #c2410c; line-height: 1.4; }
   .anki-actions { display: flex; align-items: center; gap: 6px; }
   .anki-bar .anki-send { width: auto; padding: 5px 10px; font-size: 12px; }
   .anki-clear {
-    display: flex; background: none; border: none; color: #777; cursor: pointer;
+    display: flex; background: none; border: none; color: var(--wkr-muted); cursor: pointer;
     padding: 3px; border-radius: 5px;
   }
-  .anki-clear:hover { color: #ff6b6b; background: rgba(255,255,255,0.08); }
+  .anki-clear:hover { color: var(--wkr-error); background: var(--wkr-surface); }
 
-  .pop-anki {
-    display: flex; align-items: center; justify-content: center; gap: 6px;
-    width: 100%; padding: 6px 10px; cursor: pointer; font-size: 12px;
-    border-radius: 6px; font-family: inherit;
-    background: #0f3460; border: 1px solid #1a5080; color: #7fd3ff;
+  .pop-flash {
+    display: flex; align-items: center; justify-content: center; gap: 7px;
+    width: 100%; padding: 10px; cursor: pointer; font-size: 13px; font-weight: 600;
+    border-radius: 9px; font-family: inherit;
+    background: var(--wkr-ink); border: 1px solid var(--wkr-ink); color: #fff;
     margin-top: 2px;
   }
-  .pop-anki:hover:not(:disabled) { background: #1a5080; }
-  .pop-anki:disabled { cursor: default; opacity: 0.9; }
-  .pop-anki.done { background: rgba(81,207,102,0.14); border-color: #51cf66; color: #51cf66; }
-  .pop-anki.warn { background: rgba(255,169,77,0.14); border-color: #ffa94d; color: #ffa94d; }
+  .pop-flash:hover:not(:disabled) { background: #000; }
+  .pop-flash:disabled { cursor: default; opacity: 0.9; }
+  .pop-flash.done { background: var(--wkr-green); border-color: var(--wkr-green); color: #fff; }
+  .pop-flash.warn { background: #fff7ed; border-color: #fdba74; color: #c2410c; }
 
   .popover {
-    position: fixed; width: 240px; z-index: 2147483647;
+    position: fixed; width: 280px; z-index: 2147483647;
     max-height: calc(100vh - 16px); overflow-y: auto;
-    background: #20243a; border: 1px solid #38406b; border-radius: 10px;
-    box-shadow: 0 10px 30px rgba(0,0,0,0.55); padding: 10px 12px;
-    display: flex; flex-direction: column; gap: 7px;
+    background: var(--wkr-bg); border: 1px solid var(--wkr-border); border-radius: 14px;
+    box-shadow: 0 14px 40px rgba(0,0,0,0.18); padding: 14px;
+    display: flex; flex-direction: column; gap: 10px;
   }
   .pop-head { display: flex; align-items: center; gap: 8px; }
-  .pop-word { font-size: 18px; font-weight: 700; color: #fff; flex: 1; }
-  .pop-tts, .pop-close {
+  .pop-word { font-size: 24px; font-weight: 800; color: var(--wkr-text); flex: 1; word-break: keep-all; }
+  .pop-badge {
+    font-size: 11px; font-weight: 600; padding: 3px 10px; border-radius: 20px;
+    color: var(--wkr-muted); background: var(--wkr-surface); text-transform: lowercase;
+  }
+  .pop-close {
     display: flex; background: none; border: none; cursor: pointer;
-    color: #9fb4d8; padding: 3px; border-radius: 5px;
+    color: var(--wkr-muted); padding: 3px; border-radius: 6px;
   }
-  .pop-tts:hover, .pop-close:hover { background: rgba(255,255,255,0.1); color: #fff; }
-  .pos-tag {
-    align-self: flex-start; font-size: 11px; padding: 1px 8px;
-    border: 1px solid; border-radius: 20px; text-transform: lowercase;
+  .pop-close:hover { background: var(--wkr-surface); color: var(--wkr-text); }
+  .pop-rom { display: flex; align-items: center; gap: 8px; }
+  .pop-tts {
+    display: flex; background: none; border: none; cursor: pointer;
+    color: var(--wkr-muted); padding: 3px; border-radius: 6px;
   }
-  .pop-trans { font-size: 14px; color: #e8e8f0; }
-  .pop-inf { font-size: 12px; color: #9fb4d8; }
-  .pop-inf b { color: #d8e2f5; }
-  .pop-meanings { margin: 0; padding-left: 16px; color: #b8bcd0; font-size: 12px; line-height: 1.5; }
+  .pop-tts:hover { background: var(--wkr-surface); color: var(--wkr-green-strong); }
+  .pop-rom-text {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 14px; color: var(--wkr-muted); letter-spacing: 0.2px;
+  }
+  .pop-trans { font-size: 17px; font-weight: 600; color: var(--wkr-text); }
+  .pop-inf { font-size: 12px; color: var(--wkr-muted); }
+  .pop-inf b { color: var(--wkr-text); }
+  .pop-meanings { margin: 0; padding-left: 16px; color: var(--wkr-muted); font-size: 12px; line-height: 1.5; }
+  .pop-example {
+    background: var(--wkr-surface); border: 1px solid var(--wkr-border); border-radius: 10px;
+    padding: 10px 12px; display: flex; flex-direction: column; gap: 6px;
+  }
+  .pop-example-ko { font-size: 14px; line-height: 1.6; color: var(--wkr-text); word-break: keep-all; }
+  .pop-hl { padding: 1px 3px; border-radius: 4px; font-weight: 600; }
+  .pop-example-en { font-size: 13px; font-style: italic; color: var(--wkr-muted); line-height: 1.5; }
   .pop-naver {
     display: flex; align-items: center; gap: 6px;
-    color: #7fd3ff; text-decoration: none; font-size: 12px;
-    padding-top: 4px; border-top: 1px solid #2c3252;
+    color: var(--wkr-muted); text-decoration: none; font-size: 12px;
+    padding-top: 8px; border-top: 1px solid var(--wkr-border);
   }
-  .pop-naver:hover { text-decoration: underline; }
+  .pop-naver:hover { color: var(--wkr-green-strong); text-decoration: underline; }
 `;

@@ -30,10 +30,10 @@ export function App() {
   return (
     <div className="app">
       <div className="logo">
-        <svg viewBox="0 0 128 128" width="40" height="40">
-          <rect width="128" height="128" rx="26" fill="#1971c2" />
-          <text x="64" y="64" fill="#ffffff" fontFamily="Arial, Helvetica, sans-serif"
-            fontSize={82} fontWeight={800} textAnchor="middle" dominantBaseline="central">W</text>
+        <svg viewBox="0 0 128 128" width="56" height="56">
+          <circle cx="64" cy="64" r="64" fill="#00c73c" />
+          <text x="64" y="68" fill="#ffffff" fontFamily="Arial, Helvetica, sans-serif"
+            fontSize={84} fontWeight="bold" textAnchor="middle" dominantBaseline="central">W</text>
         </svg>
       </div>
       <h1 className="title">Korean Reader</h1>
