@@ -283,9 +283,14 @@ export function cleanOcrText(text: string): string {
   return s.replace(/\s+/g, ' ').trim();
 }
 
-export async function analyze(text: string): Promise<AnalysisResult> {
+export async function analyze(text: string, presplitWords?: string[]): Promise<AnalysisResult> {
   const clean = cleanOcrText(text);
-  const tokens = clean.split(' ').filter(Boolean);
+  // Prefer Kiwi-segmented word-units (handles spaceless runs); fall back to
+  // naive space-splitting when segmentation is unavailable.
+  const tokens = (presplitWords && presplitWords.length
+    ? presplitWords.map((w) => w.trim())
+    : clean.split(' ')
+  ).filter(Boolean);
   const uniqueTokens = [...new Set(tokens)];
 
   const [sentenceTranslation, cached] = await Promise.all([

@@ -10,6 +10,7 @@ const OFFSCREEN_URL = 'offscreen.html';
 const CAPTURE_TIMEOUT_MS = 15_000;
 const OFFSCREEN_TIMEOUT_MS = 15_000;
 const OCR_TIMEOUT_MS = 120_000; // best model is slower
+const SEGMENT_TIMEOUT_MS = 120_000; // first call builds the Kiwi neural model (slow once)
 
 // Push a status line to the result panel (and the background console).
 function report(status: string, progress: number) {
@@ -82,10 +83,14 @@ export default defineBackground(() => {
             throw new Error(`OCR failed: ${describe(e)}`);
           }
 
+          // --- Word segmentation (Kiwi) — splits spaceless runs into words ---
+          report('analyzing words', 0.8);
+          const words = text ? await segment(text) : null;
+
           // --- Translation + grammar ---
           report('translating', 0.85);
           const analysis = text
-            ? await analyze(text).catch((e) => {
+            ? await analyze(text, words ?? undefined).catch((e) => {
                 console.error('[Korean Reader] analysis failed:', e);
                 return { text, sentenceTranslation: '', tone: '', words: [] };
               })
@@ -293,6 +298,31 @@ async function tesseractOcr(preprocessed: string): Promise<string> {
   if (!ocr) throw new Error('OCR engine did not respond (offscreen document not ready).');
   if (ocr.type === 'OCR_ERROR') throw new Error(ocr.message);
   return ocr.type === 'OCR_RESULT' ? ocr.text : '';
+}
+
+// Segment Korean text into word-units via Kiwi (offscreen). Best-effort: returns
+// null on any failure so the caller falls back to space-splitting in analyze().
+async function segment(text: string): Promise<string[] | null> {
+  try {
+    await withTimeout(ensureOffscreen(), OFFSCREEN_TIMEOUT_MS, 'Starting the analyzer timed out.');
+    const resp = (await withTimeout(
+      chrome.runtime.sendMessage({
+        type: 'SEGMENT_REQUEST',
+        target: 'offscreen',
+        text,
+      } satisfies ExtensionMessage),
+      SEGMENT_TIMEOUT_MS,
+      'Word analysis timed out.'
+    )) as ExtensionMessage | undefined;
+
+    if (resp && resp.type === 'SEGMENT_RESULT' && resp.words.length) return resp.words;
+    if (resp && resp.type === 'SEGMENT_ERROR') {
+      console.warn('[Korean Reader] segmentation failed:', resp.message);
+    }
+  } catch (e) {
+    console.warn('[Korean Reader] segmentation error:', e);
+  }
+  return null;
 }
 
 // ---------------------------------------------------------------------------

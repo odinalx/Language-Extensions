@@ -4,3 +4,4 @@ node_modules/
 dist/
 *.zip
 public/tesseract/
+public/kiwi/

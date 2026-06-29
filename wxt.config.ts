@@ -27,6 +27,11 @@ export default defineConfig({
         resources: ['tesseract/*'],
         matches: ['<all_urls>'],
       },
+      {
+        // Kiwi wasm + model files, loaded by the offscreen document.
+        resources: ['kiwi/*'],
+        matches: ['<all_urls>'],
+      },
     ],
   },
 });

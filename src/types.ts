@@ -95,6 +95,21 @@ export interface OcrError {
   message: string;
 }
 
+// background -> offscreen document (Kiwi word segmentation)
+export interface SegmentRequest {
+  type: 'SEGMENT_REQUEST';
+  target: 'offscreen';
+  text: string;
+}
+export interface SegmentResult {
+  type: 'SEGMENT_RESULT';
+  words: string[];
+}
+export interface SegmentError {
+  type: 'SEGMENT_ERROR';
+  message: string;
+}
+
 // offscreen -> all contexts (progress while OCR runs)
 export interface OcrProgress {
   type: 'OCR_PROGRESS';
@@ -173,6 +188,9 @@ export type ExtensionMessage =
   | OcrRequest
   | OcrResult
   | OcrError
+  | SegmentRequest
+  | SegmentResult
+  | SegmentError
   | OcrProgress
   | TtsRequest
   | TtsDone
