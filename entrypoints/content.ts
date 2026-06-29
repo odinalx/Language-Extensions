@@ -18,6 +18,8 @@ export default defineContentScript({
         setPanelProgress(activePanel, message.status, message.progress);
       }
     });
+
+    watchSelectionForMenu();
   },
 });
 
@@ -55,6 +57,34 @@ function posColor(pos: string): string {
     case 'determiner': return '#94d82d';  // lime
     default: return '#adb5bd';            // neutral grey — word not classified
   }
+}
+
+// ---------------------------------------------------------------------------
+// Context-menu visibility — only offer "Analyze selection" for Korean text
+// ---------------------------------------------------------------------------
+
+// Hangul syllables + compatibility/conjoining Jamo.
+const HANGUL_RE = /[가-힣㄰-㆏ᄀ-ᇿ]/;
+
+function watchSelectionForMenu() {
+  let lastVisible: boolean | null = null;
+  let timer: number | undefined;
+
+  const sync = () => {
+    const sel = window.getSelection()?.toString() ?? '';
+    const visible = HANGUL_RE.test(sel);
+    if (visible === lastVisible) return; // only message background on change
+    lastVisible = visible;
+    browser.runtime
+      .sendMessage({ type: 'SET_MENU_VISIBLE', visible } satisfies ExtensionMessage)
+      .catch(() => {});
+  };
+
+  // selectionchange fires rapidly while drag-selecting — debounce it.
+  document.addEventListener('selectionchange', () => {
+    clearTimeout(timer);
+    timer = window.setTimeout(sync, 150);
+  });
 }
 
 // ---------------------------------------------------------------------------

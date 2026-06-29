@@ -27,11 +27,14 @@ export default defineBackground(() => {
   // The item only shows when text is selected; clicking it forwards the
   // selected text to the content script, which drives the same result panel
   // as a scan (skipping capture/OCR).
+  // Created hidden — the content script reveals it (SET_MENU_VISIBLE) only when
+  // the current selection contains Hangul, since Chrome can't filter by content.
   chrome.runtime.onInstalled.addListener(() => {
     chrome.contextMenus.create({
       id: CONTEXT_MENU_ID,
       title: 'Analyze with Korean Reader',
       contexts: ['selection'],
+      visible: false,
     });
   });
 
@@ -44,6 +47,13 @@ export default defineBackground(() => {
       .catch(() => {
         // Content script not injected (e.g. page loaded before the extension).
       });
+  });
+
+  browser.runtime.onMessage.addListener((msg: unknown): boolean => {
+    const message = msg as ExtensionMessage;
+    if (message.type !== 'SET_MENU_VISIBLE') return false;
+    chrome.contextMenus.update(CONTEXT_MENU_ID, { visible: message.visible }).catch(() => {});
+    return false;
   });
 
   browser.runtime.onMessage.addListener(

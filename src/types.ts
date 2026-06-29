@@ -109,6 +109,14 @@ export interface AnalyzeTextRequest {
   text: string;
 }
 
+// content script -> background: show/hide the "Analyze selection" menu item.
+// Chrome can't filter context menus by content, so the content script reports
+// whether the current selection contains Hangul and we toggle visibility.
+export interface SetMenuVisible {
+  type: 'SET_MENU_VISIBLE';
+  visible: boolean;
+}
+
 // background -> offscreen document (OCR)
 export interface OcrRequest {
   type: 'OCR_REQUEST';
@@ -213,6 +221,7 @@ export type ExtensionMessage =
   | ActivateScan
   | AnalyzeSelection
   | AnalyzeTextRequest
+  | SetMenuVisible
   | CaptureRequest
   | CaptureResult
   | CaptureError
