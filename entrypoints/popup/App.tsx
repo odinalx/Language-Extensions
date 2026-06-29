@@ -37,7 +37,7 @@ export function App() {
         </svg>
       </div>
       <h1 className="title">Korean Reader</h1>
-      <p className="sub">Scan a webtoon speech bubble to extract and translate Korean text.</p>
+      <p className="sub">Scan a webtoon speech bubble — or select any Korean text and right-click "Analyze with Korean Reader".</p>
 
       <button
         className="scan-btn"

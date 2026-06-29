@@ -95,6 +95,20 @@ export interface ActivateScan {
   type: 'ACTIVATE_SCAN';
 }
 
+// background -> content script (user picked "Analyze selection" from the
+// right-click menu — open the panel and analyze this already-selected text)
+export interface AnalyzeSelection {
+  type: 'ANALYZE_SELECTION';
+  text: string;
+}
+
+// content script -> background (run the text pipeline on raw Korean text,
+// skipping capture/OCR). Responds with CaptureResult / CaptureError.
+export interface AnalyzeTextRequest {
+  type: 'ANALYZE_TEXT';
+  text: string;
+}
+
 // background -> offscreen document (OCR)
 export interface OcrRequest {
   type: 'OCR_REQUEST';
@@ -197,6 +211,8 @@ export interface AnkiClearDone {
 
 export type ExtensionMessage =
   | ActivateScan
+  | AnalyzeSelection
+  | AnalyzeTextRequest
   | CaptureRequest
   | CaptureResult
   | CaptureError

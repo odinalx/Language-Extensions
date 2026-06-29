@@ -19,7 +19,7 @@ export default defineConfig({
         "sandbox allow-scripts; script-src 'self' 'unsafe-eval' 'wasm-unsafe-eval'; object-src 'self';",
     },
     sandbox: { pages: ['kiwi-sandbox.html'] },
-    permissions: ['activeTab', 'scripting', 'storage', 'tabs', 'offscreen'],
+    permissions: ['activeTab', 'scripting', 'storage', 'tabs', 'offscreen', 'contextMenus'],
     host_permissions: [
       'https://translate.googleapis.com/*',
       'https://translate.google.com/*',

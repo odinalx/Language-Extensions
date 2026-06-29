@@ -12,6 +12,8 @@ export default defineContentScript({
       const message = msg as ExtensionMessage;
       if (message.type === 'ACTIVATE_SCAN' && !scanActive) {
         activateScan();
+      } else if (message.type === 'ANALYZE_SELECTION') {
+        runAnalyzeText(message.text);
       } else if (message.type === 'OCR_PROGRESS' && activePanel) {
         setPanelProgress(activePanel, message.status, message.progress);
       }
@@ -170,19 +172,56 @@ async function runCapture(rect: SelectionRect) {
     } satisfies ExtensionMessage)) as ExtensionMessage | undefined;
 
     if (!resp) {
-      setPanelError(panel, 'No response from the extension. Try reloading the page.', rect);
+      setPanelError(panel, 'No response from the extension. Try reloading the page.', () => runCapture(rect));
       return;
     }
-    if (resp.type === 'CAPTURE_ERROR') { setPanelError(panel, resp.message, rect); return; }
+    if (resp.type === 'CAPTURE_ERROR') { setPanelError(panel, resp.message, () => runCapture(rect)); return; }
     if (resp.type !== 'CAPTURE_RESULT') return;
 
-    renderResults(panel, resp.analysis, rect);
+    renderResults(panel, resp.analysis);
   } catch (err) {
     const msg = String(err instanceof Error ? err.message : err);
     if (msg.includes('message channel closed') || msg.includes('Extension context invalidated')) {
-      setPanelError(panel, 'Extension was reloaded. Refresh the page and try again.', rect);
+      setPanelError(panel, 'Extension was reloaded. Refresh the page and try again.', () => runCapture(rect));
     } else {
-      setPanelError(panel, msg, rect);
+      setPanelError(panel, msg, () => runCapture(rect));
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Selected text -> analyze -> render (parallels runCapture, minus capture/OCR)
+// ---------------------------------------------------------------------------
+
+async function runAnalyzeText(text: string) {
+  const clean = text.trim();
+  if (!clean) return;
+
+  const panel = createPanel();
+  activePanel = panel;
+  setPanelStatus(panel, 'Analyzing…');
+
+  const retry = () => runAnalyzeText(clean);
+  try {
+    const resp = (await browser.runtime.sendMessage({
+      type: 'ANALYZE_TEXT',
+      text: clean,
+    } satisfies ExtensionMessage)) as ExtensionMessage | undefined;
+
+    if (!resp) {
+      setPanelError(panel, 'No response from the extension. Try reloading the page.', retry);
+      return;
+    }
+    if (resp.type === 'CAPTURE_ERROR') { setPanelError(panel, resp.message, retry); return; }
+    if (resp.type !== 'CAPTURE_RESULT') return;
+
+    renderResults(panel, resp.analysis);
+  } catch (err) {
+    const msg = String(err instanceof Error ? err.message : err);
+    if (msg.includes('message channel closed') || msg.includes('Extension context invalidated')) {
+      setPanelError(panel, 'Extension was reloaded. Refresh the page and try again.', retry);
+    } else {
+      setPanelError(panel, msg, retry);
     }
   }
 }
@@ -242,18 +281,18 @@ function setPanelProgress(shadow: ShadowRoot, status: string, progress: number) 
   `;
 }
 
-function setPanelError(shadow: ShadowRoot, msg: string, rect?: SelectionRect) {
+function setPanelError(shadow: ShadowRoot, msg: string, onRetry?: () => void) {
   const body = shadow.querySelector('.body') as HTMLElement;
   body.innerHTML = `
     <div class="error">${esc(msg)}</div>
-    ${rect ? `<button class="btn-primary retry">${ICON.refresh}<span>Try again</span></button>` : ''}
+    ${onRetry ? `<button class="btn-primary retry">${ICON.refresh}<span>Try again</span></button>` : ''}
   `;
-  if (rect) {
-    body.querySelector('.retry')!.addEventListener('click', () => runCapture(rect));
+  if (onRetry) {
+    body.querySelector('.retry')!.addEventListener('click', onRetry);
   }
 }
 
-function renderResults(shadow: ShadowRoot, analysis: AnalysisResult, rect: SelectionRect) {
+function renderResults(shadow: ShadowRoot, analysis: AnalysisResult) {
   const body = shadow.querySelector('.body') as HTMLElement;
   currentAnalysis = analysis;
 

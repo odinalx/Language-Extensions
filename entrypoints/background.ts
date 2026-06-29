@@ -20,7 +20,32 @@ function report(status: string, progress: number) {
     .catch(() => {});
 }
 
+const CONTEXT_MENU_ID = 'wkr-analyze-selection';
+
 export default defineBackground(() => {
+  // --- Right-click "Analyze selection" entry point -------------------------
+  // The item only shows when text is selected; clicking it forwards the
+  // selected text to the content script, which drives the same result panel
+  // as a scan (skipping capture/OCR).
+  chrome.runtime.onInstalled.addListener(() => {
+    chrome.contextMenus.create({
+      id: CONTEXT_MENU_ID,
+      title: 'Analyze with Korean Reader',
+      contexts: ['selection'],
+    });
+  });
+
+  chrome.contextMenus.onClicked.addListener((info, tab) => {
+    if (info.menuItemId !== CONTEXT_MENU_ID || tab?.id == null) return;
+    const text = (info.selectionText ?? '').trim();
+    if (!text) return;
+    chrome.tabs
+      .sendMessage(tab.id, { type: 'ANALYZE_SELECTION', text } satisfies ExtensionMessage)
+      .catch(() => {
+        // Content script not injected (e.g. page loaded before the extension).
+      });
+  });
+
   browser.runtime.onMessage.addListener(
     (msg: unknown, sender, sendResponse): boolean => {
       const message = msg as ExtensionMessage;
@@ -105,6 +130,42 @@ export default defineBackground(() => {
           sendResponse({ type: 'CAPTURE_RESULT', analysis } satisfies ExtensionMessage);
         } catch (e) {
           console.error('[Korean Reader] capture pipeline failed:', e);
+          sendResponse({ type: 'CAPTURE_ERROR', message: describe(e) } satisfies ExtensionMessage);
+        }
+      })();
+
+      return true; // keep channel open for async sendResponse
+    }
+  );
+
+  // --- Analyze selected text: same pipeline as a scan, minus capture/OCR ---
+  browser.runtime.onMessage.addListener(
+    (msg: unknown, _sender, sendResponse): boolean => {
+      const message = msg as ExtensionMessage;
+      if (message.type !== 'ANALYZE_TEXT') return false;
+
+      (async () => {
+        try {
+          const raw = message.text;
+
+          // Mirror the scan path: soft-clean (keep sentence punctuation) before
+          // segmenting; analyze() strict-cleans each surface for the chips.
+          const soft = raw ? cleanOcrText(raw, { keepPunct: true }) : '';
+
+          report('analyzing words', 0.8);
+          const words = soft ? await segment(soft) : null;
+
+          report('translating', 0.85);
+          const analysis = soft
+            ? await analyze(raw, words ?? undefined).catch((e) => {
+                console.error('[Korean Reader] analysis failed:', e);
+                return { text: cleanOcrText(raw), sentenceTranslation: '', tone: '', words: [] };
+              })
+            : { text: '', sentenceTranslation: '', tone: '', words: [] };
+
+          sendResponse({ type: 'CAPTURE_RESULT', analysis } satisfies ExtensionMessage);
+        } catch (e) {
+          console.error('[Korean Reader] analyze-text pipeline failed:', e);
           sendResponse({ type: 'CAPTURE_ERROR', message: describe(e) } satisfies ExtensionMessage);
         }
       })();
