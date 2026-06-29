@@ -1,5 +1,5 @@
-import type { AnkiCardDraft, ExtensionMessage, SelectionRect } from '../src/types';
-import { analyze } from '../src/translate';
+import type { AnkiCardDraft, ExtensionMessage, SegWord, SelectionRect } from '../src/types';
+import { analyze, cleanOcrText } from '../src/translate';
 import { getSettings, hasOcrCreds, hasVoiceCreds } from '../src/settings';
 import { clovaOcr, clovaTts } from '../src/clova';
 import { naverWordAudioUrl } from '../src/naver';
@@ -83,16 +83,22 @@ export default defineBackground(() => {
             throw new Error(`OCR failed: ${describe(e)}`);
           }
 
+          // Clean OCR garbage BEFORE segmenting (drops underscores, unmatched
+          // brackets, stray symbols like `/`) but KEEP sentence punctuation
+          // (commas/quotes) so Kiwi's surfaces carry it through to the
+          // translation. analyze() strict-cleans each surface for the chips.
+          const soft = text ? cleanOcrText(text, { keepPunct: true }) : '';
+
           // --- Word segmentation (Kiwi) — splits spaceless runs into words ---
           report('analyzing words', 0.8);
-          const words = text ? await segment(text) : null;
+          const words = soft ? await segment(soft) : null;
 
           // --- Translation + grammar ---
           report('translating', 0.85);
-          const analysis = text
+          const analysis = soft
             ? await analyze(text, words ?? undefined).catch((e) => {
                 console.error('[Korean Reader] analysis failed:', e);
-                return { text, sentenceTranslation: '', tone: '', words: [] };
+                return { text: cleanOcrText(text), sentenceTranslation: '', tone: '', words: [] };
               })
             : { text: '', sentenceTranslation: '', tone: '', words: [] };
 
@@ -302,7 +308,7 @@ async function tesseractOcr(preprocessed: string): Promise<string> {
 
 // Segment Korean text into word-units via Kiwi (offscreen). Best-effort: returns
 // null on any failure so the caller falls back to space-splitting in analyze().
-async function segment(text: string): Promise<string[] | null> {
+async function segment(text: string): Promise<SegWord[] | null> {
   try {
     await withTimeout(ensureOffscreen(), OFFSCREEN_TIMEOUT_MS, 'Starting the analyzer timed out.');
     const resp = (await withTimeout(

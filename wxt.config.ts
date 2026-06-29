@@ -8,9 +8,17 @@ export default defineConfig({
     version: '0.1.1',
     // Tesseract compiles a .wasm core; MV3's default CSP (script-src 'self')
     // blocks WebAssembly.instantiate. 'wasm-unsafe-eval' re-allows it.
+    // Kiwi's Emscripten/Embind glue additionally JITs binding functions via
+    // `new Function(...)`, which needs 'unsafe-eval' — forbidden on extension
+    // pages but allowed on a SANDBOXED page, so Kiwi runs in kiwi-sandbox.html
+    // (a static page bundled to public/ by scripts/bundle-sandbox.mjs, served
+    // from the extension origin so it's identical in dev and production).
     content_security_policy: {
       extension_pages: "script-src 'self' 'wasm-unsafe-eval'; object-src 'self';",
+      sandbox:
+        "sandbox allow-scripts; script-src 'self' 'unsafe-eval' 'wasm-unsafe-eval'; object-src 'self';",
     },
+    sandbox: { pages: ['kiwi-sandbox.html'] },
     permissions: ['activeTab', 'scripting', 'storage', 'tabs', 'offscreen'],
     host_permissions: [
       'https://translate.googleapis.com/*',

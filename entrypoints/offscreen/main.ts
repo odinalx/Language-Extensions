@@ -1,7 +1,5 @@
 import { createWorker, type Worker as TesseractWorker } from 'tesseract.js';
-import { KiwiBuilder, type Kiwi } from 'kiwi-nlp';
-import type { ExtensionMessage } from '../../src/types';
-import { groupEojeol, type KiwiToken } from '../../src/kiwiTokens';
+import type { ExtensionMessage, SegWord } from '../../src/types';
 
 // Runs in the extension's own origin (chrome-extension://), so constructing the
 // Tesseract Worker and importing the local core wasm are both same-origin → allowed.
@@ -40,33 +38,101 @@ function getWorker(): Promise<TesseractWorker> {
 }
 
 // ---------------------------------------------------------------------------
-// Kiwi morphological analyzer (Korean word segmentation)
+// Kiwi morphological analyzer (Korean word segmentation) — via a sandboxed frame
 // ---------------------------------------------------------------------------
-// Loaded lazily and cached. The wasm + model files are bundled locally under
-// public/kiwi/ and served from the extension origin. The only language model in
-// the 0.23 release is the (mandatory) neural `cong.mdl`, so modelType is 'cong'.
+// Kiwi's Emscripten/Embind glue JITs binding functions with `new Function(...)`,
+// which the offscreen document's CSP forbids. So Kiwi runs in a SANDBOXED iframe
+// (kiwi-sandbox.html, CSP includes 'unsafe-eval'). That page has no chrome.* APIs,
+// so we fetch the wasm + model bytes here and TRANSFER them in over postMessage
+// (wasm → same-origin blob: URL; models → raw bytes). Built once, lazily.
 
-let kiwiPromise: Promise<Kiwi> | null = null;
+const KIWI_FILES = ['kiwi-wasm.wasm', 'combiningRule.txt', 'sj.morph', 'extract.mdl', 'cong.mdl'];
 
-function getKiwi(): Promise<Kiwi> {
-  if (kiwiPromise) return kiwiPromise;
-  kiwiPromise = (async () => {
-    const builder = await KiwiBuilder.create(chrome.runtime.getURL('kiwi/kiwi-wasm.wasm'));
-    const names = ['combiningRule.txt', 'sj.morph', 'extract.mdl', 'cong.mdl'];
-    const modelFiles: Record<string, string> = {};
-    for (const n of names) modelFiles[n] = chrome.runtime.getURL('kiwi/' + n);
-    return builder.build({
-      modelFiles,
-      modelType: 'cong',
-      loadDefaultDict: false,
-      loadTypoDict: false,
-      loadMultiDict: false,
-    });
+let kiwiFrame: Promise<HTMLIFrameElement> | null = null;
+let frameEl: HTMLIFrameElement | null = null;
+let segSeq = 0;
+const pending = new Map<number, { resolve: (w: SegWord[]) => void; reject: (e: Error) => void }>();
+// Resolvers for the one-time ready/init handshakes (single iframe).
+let onReady: (() => void) | null = null;
+let onInit: { resolve: () => void; reject: (e: Error) => void } | null = null;
+
+window.addEventListener('message', (ev: MessageEvent) => {
+  // Only trust messages coming from our sandbox frame.
+  if (frameEl && ev.source !== frameEl.contentWindow) return;
+  const m = ev.data as { kind?: string; id?: number; words?: SegWord[]; message?: string };
+  if (!m || typeof m !== 'object') return;
+  switch (m.kind) {
+    case 'kiwi-ready':
+      onReady?.();
+      break;
+    case 'kiwi-init-done':
+      onInit?.resolve();
+      break;
+    case 'kiwi-init-error':
+      onInit?.reject(new Error(m.message || 'init failed'));
+      break;
+    case 'kiwi-result':
+      if (typeof m.id === 'number') {
+        pending.get(m.id)?.resolve(m.words ?? []);
+        pending.delete(m.id);
+      }
+      break;
+    case 'kiwi-error':
+      if (typeof m.id === 'number') {
+        pending.get(m.id)?.reject(new Error(m.message || 'segmentation failed'));
+        pending.delete(m.id);
+      }
+      break;
+  }
+});
+
+function ensureKiwiFrame(): Promise<HTMLIFrameElement> {
+  if (kiwiFrame) return kiwiFrame;
+  kiwiFrame = (async () => {
+    const iframe = document.createElement('iframe');
+    iframe.style.display = 'none';
+    iframe.src = chrome.runtime.getURL('kiwi-sandbox.html');
+    frameEl = iframe;
+
+    const ready = new Promise<void>((resolve) => (onReady = resolve));
+    document.body.appendChild(iframe);
+    await ready;
+
+    // Fetch the packaged wasm + model files (the offscreen doc is the extension
+    // origin, so it can read its own resources directly).
+    const buffers = await Promise.all(
+      KIWI_FILES.map(async (n) => {
+        const res = await fetch(chrome.runtime.getURL('kiwi/' + n));
+        if (!res.ok) throw new Error(`Failed to load kiwi/${n}: HTTP ${res.status}`);
+        return res.arrayBuffer();
+      })
+    );
+    const [wasm, ...modelBufs] = buffers;
+    const models: Record<string, ArrayBuffer> = {};
+    KIWI_FILES.slice(1).forEach((n, i) => (models[n] = modelBufs[i]));
+
+    const inited = new Promise<void>((resolve, reject) => (onInit = { resolve, reject }));
+    iframe.contentWindow!.postMessage({ kind: 'kiwi-init', wasm, models }, '*', [
+      wasm,
+      ...Object.values(models),
+    ]);
+    await inited;
+    return iframe;
   })().catch((e) => {
-    kiwiPromise = null; // allow retry on a later request
+    kiwiFrame = null; // allow retry on a later request
+    frameEl?.remove();
+    frameEl = null;
     throw new Error(`Failed to initialize word analyzer: ${describe(e)}`);
   });
-  return kiwiPromise;
+  return kiwiFrame;
+}
+
+function segmentViaFrame(frame: HTMLIFrameElement, text: string): Promise<SegWord[]> {
+  const id = ++segSeq;
+  return new Promise<SegWord[]>((resolve, reject) => {
+    pending.set(id, { resolve, reject });
+    frame.contentWindow!.postMessage({ kind: 'kiwi-segment', id, text }, '*');
+  });
 }
 
 chrome.runtime.onMessage.addListener((msg: unknown, _sender, sendResponse): boolean => {
@@ -75,9 +141,14 @@ chrome.runtime.onMessage.addListener((msg: unknown, _sender, sendResponse): bool
   if (message.type === 'SEGMENT_REQUEST' && message.target === 'offscreen') {
     (async () => {
       try {
-        const kiwi = await getKiwi();
-        const tokens = kiwi.tokenize(message.text) as KiwiToken[];
-        sendResponse({ type: 'SEGMENT_RESULT', words: groupEojeol(message.text, tokens) } satisfies ExtensionMessage);
+        const frame = await ensureKiwiFrame();
+        // Strip OCR's (often wrong) spaces so the Kiwi model drives segmentation
+        // from scratch — OCR spacing like "수 십" or missing spaces shouldn't
+        // dictate word boundaries. Newlines collapse to a single newline so Kiwi
+        // still sees line breaks as soft separators.
+        const compact = message.text.replace(/[^\S\n]+/g, '').replace(/\n+/g, '\n');
+        const words = await segmentViaFrame(frame, compact);
+        sendResponse({ type: 'SEGMENT_RESULT', words } satisfies ExtensionMessage);
       } catch (e) {
         sendResponse({ type: 'SEGMENT_ERROR', message: describe(e) } satisfies ExtensionMessage);
       }

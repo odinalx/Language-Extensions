@@ -117,19 +117,21 @@ async function addOneCard(
   card: AnkiCardDraft,
   resolveAudio: (text: string) => Promise<string | null>
 ): Promise<void> {
-  // Verbs/adjectives look up better under their dictionary form.
-  const lookupTerm = card.infinitive || card.word;
-  const dq = encodeURIComponent(lookupTerm);
+  // The Vocab field + dictionary links + word audio use the NORMAL form (드롭
+  // particles/politeness): 사과를→사과, 허락하다니→허락하다. The Sentence keeps the
+  // original phrase and highlights the surface word that actually appears there.
+  const normal = card.base || card.infinitive || card.word;
+  const dq = encodeURIComponent(normal);
 
   const gloss = dedupe([card.wordTranslation, ...card.meanings]).join('; ');
 
-  const wordSound = await storeAudio(url, resolveAudio, card.word, 'w');
+  const wordSound = await storeAudio(url, resolveAudio, normal, 'w');
   const sentSound = card.sentence
     ? await storeAudio(url, resolveAudio, card.sentence, 's')
     : '';
 
   const fields: Record<string, string> = {
-    Vocab: esc(card.word),
+    Vocab: esc(normal),
     'Vocab-English': esc(gloss),
     'Vocab-Sound': wordSound,
     'Vocab-Dic1': `https://ko.dict.naver.com/#/search?range=all&query=${dq}`,

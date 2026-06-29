@@ -85,7 +85,7 @@ function activateScan() {
 
   const selBox = el('div', {
     position: 'fixed', display: 'none',
-    border: '2px dashed #00c73c', background: 'rgba(0,199,60,0.10)',
+    border: '1.5px solid #00c73c', background: 'rgba(0,199,60,0.10)',
     zIndex: '2147483646', pointerEvents: 'none', boxSizing: 'border-box',
   });
 
@@ -404,6 +404,7 @@ function showWordPopover(shadow: ShadowRoot, anchor: HTMLElement, info: WordInfo
   shadow.querySelector('.popover')?.remove();
 
   const color = posColor(info.pos);
+  const dictForm = info.infinitive || info.base;
   const sentence = currentAnalysis?.text || '';
   const sentenceTr = currentAnalysis?.sentenceTranslation || '';
   const pop = document.createElement('div');
@@ -419,7 +420,9 @@ function showWordPopover(shadow: ShadowRoot, anchor: HTMLElement, info: WordInfo
       <span class="pop-rom-text">[${esc(romanize(info.surface))}]</span>
     </div>
     <div class="pop-trans">${info.translation ? esc(info.translation) : '<span class="muted">no translation</span>'}</div>
-    ${info.infinitive ? `<div class="pop-inf">dictionary form: <b>${esc(info.infinitive)}</b></div>` : ''}
+    ${dictForm && dictForm !== info.surface ? `<div class="pop-inf">dictionary form: <b>${esc(dictForm)}</b><button class="pop-tts pop-tts-inf" title="Pronounce dictionary form">${ICON.speaker}</button></div>` : ''}
+    ${info.form ? `<div class="pop-form">form: ${esc(info.form)}</div>` : ''}
+    ${info.speechLevel ? `<div class="pop-form">speech level: ${esc(info.speechLevel)}</div>` : ''}
     ${info.meanings.length > 1
       ? `<ul class="pop-meanings">${info.meanings.slice(0, 5).map((m) => `<li>${esc(m)}</li>`).join('')}</ul>`
       : ''}
@@ -428,7 +431,7 @@ function showWordPopover(shadow: ShadowRoot, anchor: HTMLElement, info: WordInfo
       ${sentenceTr ? `<div class="pop-example-en">${esc(`“${sentenceTr}”`)}</div>` : ''}
     </div>` : ''}
     <button class="pop-flash">${ICON.plus}<span>Add to flashcards</span></button>
-    <a class="pop-naver" target="_blank" href="https://korean.dict.naver.com/koendict/#/search?range=all&query=${encodeURIComponent(info.infinitive || info.surface)}">
+    <a class="pop-naver" target="_blank" href="https://korean.dict.naver.com/koendict/#/search?range=all&query=${encodeURIComponent(info.infinitive || info.base || info.surface)}">
       ${ICON.external}<span>Open in Naver Dictionary</span>
     </a>
   `;
@@ -459,6 +462,7 @@ function showWordPopover(shadow: ShadowRoot, anchor: HTMLElement, info: WordInfo
   };
 
   pop.querySelector('.pop-tts')!.addEventListener('click', () => tts(info.surface));
+  if (dictForm) pop.querySelector('.pop-tts-inf')?.addEventListener('click', () => tts(dictForm));
   pop.querySelector('.pop-close')!.addEventListener('click', dismiss);
 
   const ankiBtn = pop.querySelector('.pop-flash') as HTMLButtonElement;
@@ -468,6 +472,7 @@ function showWordPopover(shadow: ShadowRoot, anchor: HTMLElement, info: WordInfo
     ankiLabel.textContent = 'Adding…';
     const card = {
       word: info.surface,
+      base: info.base,
       wordTranslation: info.translation || '',
       meanings: info.meanings || [],
       wordPos: info.pos || '',
@@ -608,7 +613,7 @@ const STYLES = `
   .panel {
     background: var(--wkr-bg);
     color: var(--wkr-text);
-    border: 1px solid var(--wkr-border);
+    border: 1.5px solid var(--wkr-green);
     border-radius: 14px;
     box-shadow: 0 12px 36px rgba(0,0,0,0.16);
     overflow: hidden;
@@ -667,7 +672,7 @@ const STYLES = `
     cursor: pointer; padding: 2px 3px 7px; border-radius: 5px;
     background-image: radial-gradient(circle, var(--c, var(--wkr-muted)) 1.6px, transparent 1.9px);
     background-size: 7px 7px;
-    background-repeat: repeat-x;
+    background-repeat: round no-repeat;
     background-position: left bottom 1px;
     transition: background-color 0.12s ease;
   }
@@ -731,7 +736,7 @@ const STYLES = `
   .popover {
     position: fixed; width: 280px; z-index: 2147483647;
     max-height: calc(100vh - 16px); overflow-y: auto;
-    background: var(--wkr-bg); border: 1px solid var(--wkr-border); border-radius: 14px;
+    background: var(--wkr-bg); border: 1.5px solid var(--wkr-green); border-radius: 14px;
     box-shadow: 0 14px 40px rgba(0,0,0,0.18); padding: 14px;
     display: flex; flex-direction: column; gap: 10px;
   }
@@ -757,8 +762,10 @@ const STYLES = `
     font-size: 14px; color: var(--wkr-muted); letter-spacing: 0.2px;
   }
   .pop-trans { font-size: 17px; font-weight: 600; color: var(--wkr-text); }
-  .pop-inf { font-size: 12px; color: var(--wkr-muted); }
+  .pop-inf { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--wkr-muted); }
   .pop-inf b { color: var(--wkr-text); }
+  .pop-tts-inf { padding: 2px; }
+  .pop-form { font-size: 12px; color: var(--wkr-muted); }
   .pop-meanings { margin: 0; padding-left: 16px; color: var(--wkr-muted); font-size: 12px; line-height: 1.5; }
   .pop-example {
     background: var(--wkr-surface); border: 1px solid var(--wkr-border); border-radius: 10px;

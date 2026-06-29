@@ -5,3 +5,4 @@ dist/
 *.zip
 public/tesseract/
 public/kiwi/
+public/kiwi-sandbox.js

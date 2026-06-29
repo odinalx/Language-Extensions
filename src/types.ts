@@ -33,7 +33,8 @@ export const DEFAULT_SETTINGS: Settings = {
 // One Anki card waiting in the session queue (or being sent directly).
 export interface AnkiCardDraft {
   id: string;                  // unique queue id
-  word: string;                // Korean word (card front)
+  word: string;                // Korean word as it appears in the sentence (surface)
+  base?: string;               // normal/dictionary form used for the Vocab field
   wordTranslation: string;     // primary English meaning
   meanings: string[];          // additional meanings
   wordPos: string;             // part of speech (may be '')
@@ -50,6 +51,20 @@ export interface WordInfo {
   meanings: string[];    // additional meanings (may be empty)
   pos: string;           // part of speech: 'noun' | 'verb' | 'adjective' | ... | ''
   infinitive?: string;   // Korean dictionary form for verbs/adjectives (e.g. 먹다)
+  base?: string;         // normal form for ANY word (사과를→사과, 허락하다니→허락하다)
+  form?: string;         // grammatical ending note (e.g. "-다니 — exclamatory (surprise)")
+  speechLevel?: string;  // politeness/speech level (e.g. "casual (해체)")
+}
+
+// A morpheme produced by Kiwi (subset of its TokenInfo).
+export interface SegMorph {
+  str: string;
+  tag: string;
+}
+// A reconstructed word-unit (어절): its surface plus the morphemes composing it.
+export interface SegWord {
+  surface: string;
+  morphs: SegMorph[];
 }
 
 export interface AnalysisResult {
@@ -103,7 +118,7 @@ export interface SegmentRequest {
 }
 export interface SegmentResult {
   type: 'SEGMENT_RESULT';
-  words: string[];
+  words: SegWord[];
 }
 export interface SegmentError {
   type: 'SEGMENT_ERROR';

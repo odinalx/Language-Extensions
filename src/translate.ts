@@ -1,5 +1,6 @@
-import type { AnalysisResult, WordInfo } from './types';
+import type { AnalysisResult, SegMorph, SegWord, WordInfo } from './types';
 import { naverLemma } from './naver';
+import { wordGrammar } from './grammar';
 
 // Uses Google Translate's public (unofficial) endpoint. Called from the
 // background service worker, which has host_permissions for translate.googleapis.com
@@ -211,7 +212,7 @@ async function mapLimit<T, R>(items: T[], limit: number, fn: (t: T) => Promise<R
 // Per-word cache in chrome.storage.local keyed by the surface form.
 // Bump the prefix whenever the analysis output shape changes so stale entries
 // (e.g. cached before POS detection improved) are ignored.
-const CACHE_PREFIX = 'wkr5:';
+const CACHE_PREFIX = 'wkr6:';
 
 async function getCache(words: string[]): Promise<Record<string, WordInfo>> {
   const keys = words.map((w) => `${CACHE_PREFIX}${w}`);
@@ -254,7 +255,11 @@ function removeUnmatchedPair(s: string, open: string, close: string): string {
   return [...s].filter((_, i) => !remove.has(i)).join('');
 }
 
-export function cleanOcrText(text: string): string {
+// Strict mode (default) keeps ONLY letters/numbers/whitespace and . ! ? — used
+// for the displayed word chips. `keepPunct` additionally keeps , … ~ · and
+// quotes: used for the sentence we send to Google, since commas/quotes are real
+// translation cues we don't want to throw away.
+export function cleanOcrText(text: string, opts?: { keepPunct?: boolean }): string {
   let s = text.replace(/\s+/g, ' ').trim();
   // Underscores are an OCR artifact (underlines / panel borders), never real
   // Korean text — drop them.
@@ -268,33 +273,61 @@ export function cleanOcrText(text: string): string {
       s = s.slice(0, drop) + s.slice(drop + 1);
     }
   }
-  // Normalize CJK / fullwidth sentence enders to their ASCII forms, then keep
-  // ONLY letters, numbers, whitespace and . ! ?  — every other symbol the OCR
-  // hallucinates (。、，·~「」“”％ etc.) is dropped. Runs of dots collapse to a
-  // single ellipsis, so the only punctuation that survives is . … ! ?.
+  // Normalize CJK / fullwidth sentence enders to their ASCII forms, then strip
+  // every other OCR-hallucinated symbol. Runs of dots collapse to an ellipsis.
+  const strip = opts?.keepPunct
+    ? /[^\p{L}\p{N}\s.!?,…~·"'’“”]/gu
+    : /[^\p{L}\p{N}\s.!?]/gu;
   s = s
     .replace(/[。．｡]/g, '.')
     .replace(/！/g, '!')
     .replace(/？/g, '?')
     .replace(/[…⋯]/g, '...')
-    .replace(/[^\p{L}\p{N}\s.!?]/gu, '')
+    .replace(strip, '')
     .replace(/\.{2,}/g, '...')
     .replace(/\s+([.!?])/g, '$1');
   return s.replace(/\s+/g, ' ').trim();
 }
 
-export async function analyze(text: string, presplitWords?: string[]): Promise<AnalysisResult> {
-  const clean = cleanOcrText(text);
-  // Prefer Kiwi-segmented word-units (handles spaceless runs); fall back to
-  // naive space-splitting when segmentation is unavailable.
-  const tokens = (presplitWords && presplitWords.length
-    ? presplitWords.map((w) => w.trim())
-    : clean.split(' ')
-  ).filter(Boolean);
+export async function analyze(text: string, segWords?: SegWord[]): Promise<AnalysisResult> {
+  // Build, from Kiwi's word-units, three things:
+  //  • tokens     — strict-cleaned clickable chips (. ! ? only)
+  //  • morphs map — per token, for dictionary form / tense / POS
+  //  • translationInput — the surfaces joined with spaces, i.e. CORRECTLY-spaced
+  //    Korean with punctuation kept. OCR spacing is often wrong and Korean
+  //    meaning depends on it, so re-spacing via Kiwi gives Google much better
+  //    input than the raw OCR line.
+  const tokens: string[] = [];
+  const morphBySurface = new Map<string, SegMorph[]>();
+  let translationInput: string;
+
+  if (segWords && segWords.length) {
+    const surfaces: string[] = [];
+    for (const w of segWords) {
+      const soft = w.surface.trim();
+      if (!soft) continue;
+      surfaces.push(soft);
+      const token = cleanOcrText(w.surface); // strict — for the chip + lookup
+      if (token) {
+        tokens.push(token);
+        if (!morphBySurface.has(token)) morphBySurface.set(token, w.morphs);
+      }
+    }
+    translationInput = surfaces.join(' ');
+  } else {
+    // No segmentation: fall back to naive space-splitting of the cleaned text.
+    translationInput = cleanOcrText(text, { keepPunct: true });
+    for (const t of cleanOcrText(text).split(' ')) if (t) tokens.push(t);
+  }
+
+  // The displayed sentence is the strict-cleaned, Kiwi-respaced text so the
+  // popover example highlight lines up with the chips.
+  const clean =
+    segWords && segWords.length ? tokens.join(' ') : cleanOcrText(text);
   const uniqueTokens = [...new Set(tokens)];
 
   const [sentenceTranslation, cached] = await Promise.all([
-    translateSentence(clean).catch(() => ''),
+    translateSentence(translationInput).catch(() => ''),
     getCache(uniqueTokens),
   ]);
 
@@ -306,6 +339,20 @@ export async function analyze(text: string, presplitWords?: string[]): Promise<A
 
   const byWord: Record<string, WordInfo> = { ...cached };
   for (const info of fetched) byWord[info.surface] = info;
+
+  // Attach Kiwi-derived grammar (normal form, ending note, speech level). Kiwi's
+  // lemma is more reliable than the Naver-based one, so prefer it when present.
+  for (const surface of Object.keys(byWord)) {
+    const g = wordGrammar(morphBySurface.get(surface));
+    const info = byWord[surface];
+    if (g.base && g.base !== surface) info.base = g.base;
+    if (g.infinitive && g.infinitive !== surface) info.infinitive = g.infinitive;
+    // Kiwi knows the Korean POS; fill it in when Google's dt=bd didn't classify
+    // the inflected token (common for predicates like 허락하다니 → empty → gray).
+    if (g.pos && !info.pos) info.pos = g.pos;
+    if (g.form) info.form = g.form;
+    if (g.speechLevel) info.speechLevel = g.speechLevel;
+  }
 
   // Preserve original token order (including duplicates).
   const words = tokens.map(
