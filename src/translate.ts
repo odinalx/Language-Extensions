@@ -361,9 +361,12 @@ export async function analyze(text: string, segWords?: SegWord[]): Promise<Analy
     const info = byWord[surface];
     if (g.base && g.base !== surface) info.base = g.base;
     if (g.infinitive && g.infinitive !== surface) info.infinitive = g.infinitive;
-    // Kiwi knows the Korean POS; fill it in when Google's dt=bd didn't classify
-    // the inflected token (common for predicates like 허락하다니 → empty → gray).
-    if (g.pos && !info.pos) info.pos = g.pos;
+    // Kiwi natively distinguishes Korean verb vs adjective — descriptive verbs
+    // like 붉다 ("to be red") are VA → adjective, where Google's English-derived
+    // bd POS is null and lookupWord's looksLikePredicate fallback blindly guesses
+    // 'verb'. Trust Kiwi's POS whenever it has one; keep Google's as a fallback
+    // (e.g. tokens Kiwi can't tag, where dt=bd did classify the lemma).
+    if (g.pos) info.pos = g.pos;
     if (g.form) info.form = g.form;
     if (g.speechLevel) info.speechLevel = g.speechLevel;
   }
