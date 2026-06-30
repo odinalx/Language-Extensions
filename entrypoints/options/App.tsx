@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { DEFAULT_SETTINGS, type Settings } from '../../src/types';
-import { getSettings, saveSettings, hasOcrCreds, hasVoiceCreds } from '../../src/settings';
+import { getSettings, saveSettings, hasVoiceCreds } from '../../src/settings';
 
 export function App() {
   const [settings, setSettings] = useState<Settings>(DEFAULT_SETTINGS);
@@ -29,37 +29,6 @@ export function App() {
       </p>
 
       {SHOW_NAVER_CLOUD && (<>
-      <section>
-        <div className="sec-head">
-          <h2>CLOVA OCR</h2>
-          <span className={hasOcrCreds(settings) ? 'badge on' : 'badge'}>
-            {hasOcrCreds(settings) ? 'active' : 'using Tesseract'}
-          </span>
-        </div>
-        <p className="hint">
-          Naver Cloud → Services → <strong>CLOVA OCR</strong>. Create a Domain (General),
-          then copy its <em>APIGW Invoke URL</em> and <em>Secret Key</em>.
-        </p>
-        <label>
-          Invoke URL
-          <input
-            type="text"
-            placeholder="https://xxxxx.apigw.ntruss.com/custom/v1/.../general"
-            value={settings.ocrInvokeUrl}
-            onChange={(e) => update({ ocrInvokeUrl: e.target.value })}
-          />
-        </label>
-        <label>
-          Secret Key
-          <input
-            type="password"
-            placeholder="X-OCR-SECRET"
-            value={settings.ocrSecret}
-            onChange={(e) => update({ ocrSecret: e.target.value })}
-          />
-        </label>
-      </section>
-
       <section>
         <div className="sec-head">
           <h2>Clova Voice (pronunciation)</h2>
@@ -168,6 +137,6 @@ export function App() {
 
 const extensionOrigin = `chrome-extension://${chrome.runtime.id}`;
 
-// Naver Cloud (CLOVA OCR / Clova Voice) settings are set aside for now — the code
-// stays but the UI is hidden. Flip to true to bring the sections back.
+// Naver Clova Voice settings are set aside for now — the code stays but the UI
+// is hidden. Flip to true to bring the section back.
 const SHOW_NAVER_CLOUD = false;

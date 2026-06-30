@@ -682,7 +682,6 @@ const STYLES = `
   .panel {
     background: var(--wkr-bg);
     color: var(--wkr-text);
-    border: 1.5px solid var(--wkr-green);
     border-radius: 14px;
     box-shadow: 0 12px 36px rgba(0,0,0,0.16);
     overflow: hidden;
@@ -805,7 +804,7 @@ const STYLES = `
   .popover {
     position: fixed; width: 280px; z-index: 2147483647;
     max-height: calc(100vh - 16px); overflow-y: auto;
-    background: var(--wkr-bg); border: 1.5px solid var(--wkr-green); border-radius: 14px;
+    background: var(--wkr-bg); border-radius: 14px;
     box-shadow: 0 14px 40px rgba(0,0,0,0.18); padding: 14px;
     display: flex; flex-direction: column; gap: 10px;
   }

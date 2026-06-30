@@ -11,10 +11,6 @@ export async function saveSettings(settings: Settings): Promise<void> {
   await chrome.storage.local.set({ [KEY]: settings });
 }
 
-export function hasOcrCreds(s: Settings): boolean {
-  return Boolean(s.ocrInvokeUrl.trim() && s.ocrSecret.trim());
-}
-
 export function hasVoiceCreds(s: Settings): boolean {
   return Boolean(s.voiceApiKeyId.trim() && s.voiceApiKey.trim());
 }

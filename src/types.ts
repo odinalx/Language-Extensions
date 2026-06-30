@@ -6,10 +6,8 @@ export interface SelectionRect {
   devicePixelRatio: number;
 }
 
-// Naver Cloud credentials (one account powers both services).
+// Naver Cloud credentials (Clova Voice) + Anki.
 export interface Settings {
-  ocrInvokeUrl: string;   // CLOVA OCR APIGW invoke URL
-  ocrSecret: string;      // CLOVA OCR X-OCR-SECRET
   voiceApiKeyId: string;  // Clova Voice X-NCP-APIGW-API-KEY-ID
   voiceApiKey: string;    // Clova Voice X-NCP-APIGW-API-KEY
   voiceSpeaker: string;   // e.g. "nara"
@@ -20,8 +18,6 @@ export interface Settings {
 }
 
 export const DEFAULT_SETTINGS: Settings = {
-  ocrInvokeUrl: '',
-  ocrSecret: '',
   voiceApiKeyId: '',
   voiceApiKey: '',
   voiceSpeaker: 'nara',

@@ -1,7 +1,7 @@
 import type { AnkiCardDraft, ExtensionMessage, SegWord, SelectionRect } from '../src/types';
 import { analyze, cleanOcrText } from '../src/translate';
-import { getSettings, hasOcrCreds, hasVoiceCreds } from '../src/settings';
-import { clovaOcr, clovaTts } from '../src/clova';
+import { getSettings, hasVoiceCreds } from '../src/settings';
+import { clovaTts } from '../src/clova';
 import { naverWordAudioUrl } from '../src/naver';
 import { sendCardsToAnki } from '../src/anki';
 import type { Settings } from '../src/types';
@@ -93,26 +93,10 @@ export default defineBackground(() => {
             throw new Error(`Failed to process the captured image: ${describe(e)}`);
           }
 
-          // --- OCR (CLOVA if configured, else local Tesseract) ---
-          const settings = await getSettings();
+          // --- OCR (local Tesseract) ---
           let text = '';
           try {
-            if (hasOcrCreds(settings)) {
-              report('running CLOVA OCR', 0.5);
-              try {
-                text = await withTimeout(
-                  clovaOcr(cropped, settings),
-                  OCR_TIMEOUT_MS,
-                  'CLOVA OCR timed out.'
-                );
-              } catch (e) {
-                console.warn('[Korean Reader] CLOVA OCR failed, falling back to Tesseract:', e);
-                report('CLOVA failed — using local OCR', 0.4);
-                text = await tesseractOcr(preprocessed);
-              }
-            } else {
-              text = await tesseractOcr(preprocessed);
-            }
+            text = await tesseractOcr(preprocessed);
           } catch (e) {
             console.error('[Korean Reader] OCR failed:', e);
             throw new Error(`OCR failed: ${describe(e)}`);

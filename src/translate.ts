@@ -87,7 +87,7 @@ async function queryBd(word: string): Promise<BdResult> {
   if (!res.ok) throw new Error(`Lookup HTTP ${res.status}`);
   const data = await res.json();
 
-  const translation = ((data?.[0] ?? []).map((s: unknown[]) => s?.[0] ?? '').join('') || '').trim();
+  const mtTranslation = ((data?.[0] ?? []).map((s: unknown[]) => s?.[0] ?? '').join('') || '').trim();
 
   let pos = '';
   const meanings: string[] = [];
@@ -100,6 +100,13 @@ async function queryBd(word: string): Promise<BdResult> {
       }
     }
   }
+
+  // The plain `t` MT field translates the word as if it were a sentence, picking
+  // one dominant sense out of context — for ambiguous single syllables it often
+  // disagrees with the dictionary POS we report (사 → "buy" while the dict block
+  // gives the numeral "four"). The dictionary's top meaning is sense-aligned with
+  // `pos`, so prefer it; fall back to MT when there's no dictionary entry.
+  const translation = meanings[0] || mtTranslation;
   return { translation, pos, meanings: meanings.slice(0, 6) };
 }
 
@@ -212,7 +219,7 @@ async function mapLimit<T, R>(items: T[], limit: number, fn: (t: T) => Promise<R
 // Per-word cache in chrome.storage.local keyed by the surface form.
 // Bump the prefix whenever the analysis output shape changes so stale entries
 // (e.g. cached before POS detection improved) are ignored.
-const CACHE_PREFIX = 'wkr6:';
+const CACHE_PREFIX = 'wkr7:';
 
 async function getCache(words: string[]): Promise<Record<string, WordInfo>> {
   const keys = words.map((w) => `${CACHE_PREFIX}${w}`);
@@ -286,7 +293,14 @@ export function cleanOcrText(text: string, opts?: { keepPunct?: boolean }): stri
     .replace(strip, '')
     .replace(/\.{2,}/g, '...')
     .replace(/\s+([.!?])/g, '$1');
-  return s.replace(/\s+/g, ' ').trim();
+  s = s.replace(/\s+/g, ' ').trim();
+  // A lone standalone jamo (single ㄱ/ㅏ/ㅈ…) is almost always an OCR artifact
+  // from a bubble outline, not real text. Drop single-jamo tokens, but keep
+  // multi-jamo expressions like ㅋㅋ / ㅠㅠ which are intentional.
+  return s
+    .split(' ')
+    .filter((t) => !/^[㄰-㆏ᄀ-ᇿ]$/u.test(t))
+    .join(' ');
 }
 
 export async function analyze(text: string, segWords?: SegWord[]): Promise<AnalysisResult> {
